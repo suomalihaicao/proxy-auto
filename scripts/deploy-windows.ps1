@@ -207,12 +207,59 @@ else:
     print("Admin exists: {}".format(admin_user))
 '@
 
+  $prevPythonPath = $env:PYTHONPATH
+  $prevLocation = Get-Location
+  $env:PYTHONPATH = if ([string]::IsNullOrWhiteSpace($prevPythonPath)) {
+    $BaseDir
+  } else {
+    "$BaseDir;$prevPythonPath"
+  }
+
+  Set-Location $BaseDir
   Set-Content -Path $adminBootstrapPath -Value $adminBootstrap -Encoding utf8
   try {
     & $PythonBinary $adminBootstrapPath
   } finally {
     Remove-Item -Path $adminBootstrapPath -ErrorAction SilentlyContinue
+    if ($prevLocation) {
+      Set-Location $prevLocation.Path
+    }
+    if ([string]::IsNullOrWhiteSpace($prevPythonPath)) {
+      Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    } else {
+      $env:PYTHONPATH = $prevPythonPath
+    }
   }
+}
+
+function Get-PanelHostHint {
+  param([string]$PublicIp)
+  $overrideHost = $env:PROXY_AUTO_PANEL_HOST
+  if (-not [string]::IsNullOrWhiteSpace($overrideHost)) {
+    return $overrideHost.Trim()
+  }
+
+  if (Test-Path -Path $SettingsPath) {
+    try {
+      $cfg = Get-Content -Raw -Path $SettingsPath | ConvertFrom-Json
+      if ($null -ne $cfg.web_host) {
+        $webHost = [string]$cfg.web_host
+        if (-not [string]::IsNullOrWhiteSpace($webHost)) {
+          $webHost = $webHost.Trim()
+          if ($webHost -ne "0.0.0.0" -and $webHost -ne "::") {
+            return $webHost
+          }
+        }
+      }
+    } catch {
+      # ignore invalid settings file
+    }
+  }
+
+  if ([string]::IsNullOrWhiteSpace($PublicIp) -or $PublicIp -eq "Public IP not detected") {
+    return "127.0.0.1"
+  }
+  return $PublicIp
 }
 
 function Start-ServiceInTerminal {
@@ -788,11 +835,11 @@ if ($startNow -match '^[Nn]$') {
   Write-DeployLog "Skip auto-start. Manual command: .venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port $webPort"
 } else {
   $publicIp = Get-PublicIp
-  $webHostHint = if ([string]::IsNullOrWhiteSpace($publicIp) -or $publicIp -eq "Public IP not detected") { "127.0.0.1" } else { $publicIp }
+  $webHostHint = Get-PanelHostHint -PublicIp $publicIp
   $proc = Start-ServiceInTerminal -PythonBinary $VenvPython -WebPort $webPort
   Write-DeployLog "Service terminal started, PID=$($proc.Id)"
 
-  if (Wait-ForServiceReady -HostHint $webHostHint -Port $webPort -Attempts 20 -DelaySeconds 1) {
+  if (Wait-ForServiceReady -HostHint "127.0.0.1" -Port $webPort -Attempts 20 -DelaySeconds 1) {
     Open-WebPanel -HostHint $webHostHint -Port $webPort -AdminUser $adminUser -AdminPassword $adminPassword
   } else {
     Write-DeployLog "Health check timeout (about 20s), please verify the service status manually."
@@ -803,7 +850,7 @@ if ($startNow -match '^[Nn]$') {
 Write-DeployLog "Deployment completed"
 if ($startNow -match '^[Nn]$') {
   $publicIp = Get-PublicIp
-  $webHostHint = if ([string]::IsNullOrWhiteSpace($publicIp) -or $publicIp -eq "Public IP not detected") { "127.0.0.1" } else { $publicIp }
+  $webHostHint = Get-PanelHostHint -PublicIp $publicIp
   Write-DeployLog ("Web URL: http://{0}:{1}/login" -f $webHostHint, $webPort)
   Write-DeployLog ("Default login: {0} / {1}" -f $adminUser, $adminPassword)
 }
