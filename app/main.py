@@ -274,9 +274,9 @@ def _normalize_next_url(path: str | None) -> str:
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(
+    request: Request,
     next: str = "/ui/",
     error: str | None = None,
-    request: Request,
     _=Depends(_require_web_access),
 ):
     if request.cookies.get(COOKIE_NAME):
