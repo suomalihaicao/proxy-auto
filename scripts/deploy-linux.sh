@@ -616,7 +616,7 @@ if [[ "$DEPLOY_MODE" == "interactive" ]]; then
       exit 1
     fi
     read -r -p "单 IP 代理地址 (例如: 127.0.0.1): " proxy_host
-    read -r -p "单 IP 代理端口 (例如: 8080): " proxy_port
+    read -r -p "单 IP 代理端口 (例如: 6666): " proxy_port
     read -r -p "单 IP 账号（可空）: " proxy_user
     read -r -s -p "单 IP 密码（可空）: " proxy_pass
     echo
@@ -642,8 +642,8 @@ if [[ "$DEPLOY_MODE" == "interactive" ]]; then
   listen_host="${listen_host:-0.0.0.0}"
   read -r -p "代理监听端口 [3128]: " listen_port
   listen_port="${listen_port:-3128}"
-  read -r -p "Web 监听端口 [8080]: " web_port
-  web_port="${web_port:-8080}"
+  read -r -p "Web 监听端口 [6666]: " web_port
+  web_port="${web_port:-6666}"
 
   read -r -p "管理员用户名 [admin]: " admin_user
   admin_user="${admin_user:-admin}"
@@ -690,9 +690,9 @@ PY
 
   read -r -p "部署完成后立即启动服务？[Y/n]: " start_now
   if [[ "${start_now:-Y}" =~ ^[Nn]$ ]]; then
-    log "已跳过启动，后续可执行: bash scripts/restart-public-8080.sh"
+    log "已跳过启动，后续可执行: bash scripts/restart-public-6666.sh"
   else
-    bash "$BASE_DIR/scripts/restart-public-8080.sh"
+    bash "$BASE_DIR/scripts/restart-public-6666.sh"
   fi
 
   log "部署完成"
@@ -700,5 +700,5 @@ PY
   log "默认登录: ${admin_user} / ${admin_password}"
 else
   log "部署完成后将直接启动服务（非交互模式）。参数/代理配置请在 Web 面板配置。"
-  bash "$BASE_DIR/scripts/restart-public-8080.sh"
+  bash "$BASE_DIR/scripts/restart-public-6666.sh"
 fi

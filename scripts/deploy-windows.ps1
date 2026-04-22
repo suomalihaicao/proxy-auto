@@ -116,7 +116,7 @@ function Write-DeploymentSettings {
     listen_host = $ListenHost
     listen_port = Parse-IntValue -Value $ListenPort -Default 3128 -Min 1 -Max 65535
     web_host = "0.0.0.0"
-    web_port = Parse-IntValue -Value $WebPort -Default 8080 -Min 1 -Max 65535
+    web_port = Parse-IntValue -Value $WebPort -Default 6666 -Min 1 -Max 65535
     proxy_mode = $ProxyMode
     proxy_protocol = $ProxyProtocol
     proxy_host = $ProxyHost
@@ -155,7 +155,7 @@ function Ensure-DefaultSettings {
   Write-DeploymentSettings `
     -ListenHost "0.0.0.0" `
     -ListenPort "3128" `
-    -WebPort "8080" `
+    -WebPort "6666" `
     -ProxyMode "direct" `
     -ProxyProtocol "http" `
     -ProxyHost "" `
@@ -169,19 +169,19 @@ function Ensure-DefaultSettings {
 }
 
 function Read-WebPortFromSettings {
-  param([string]$Fallback = "8080")
+  param([string]$Fallback = "6666")
   if (-not (Test-Path -Path $SettingsPath)) {
-    return Parse-IntValue -Value $Fallback -Default 8080 -Min 1 -Max 65535
+    return Parse-IntValue -Value $Fallback -Default 6666 -Min 1 -Max 65535
   }
   try {
     $cfg = Get-Content -Raw -Path $SettingsPath | ConvertFrom-Json
     if ($null -ne $cfg.web_port) {
-      return Parse-IntValue -Value ([string]$cfg.web_port) -Default 8080 -Min 1 -Max 65535
+      return Parse-IntValue -Value ([string]$cfg.web_port) -Default 6666 -Min 1 -Max 65535
     }
   } catch {
-    return Parse-IntValue -Value $Fallback -Default 8080 -Min 1 -Max 65535
+    return Parse-IntValue -Value $Fallback -Default 6666 -Min 1 -Max 65535
   }
-  return Parse-IntValue -Value $Fallback -Default 8080 -Min 1 -Max 65535
+  return Parse-IntValue -Value $Fallback -Default 6666 -Min 1 -Max 65535
 }
 
 function Ensure-Admin {
@@ -760,7 +760,7 @@ $bigdataApiUrl = ""
 $bigdataApiToken = ""
 $listenHost = "0.0.0.0"
 $listenPort = "3128"
-$webPort = Read-WebPortFromSettings -Fallback "8080"
+$webPort = Read-WebPortFromSettings -Fallback "6666"
 $adminUser = "admin"
 $adminPassword = "admin123"
 $sessionSecret = New-SessionSecret -PythonBinary $VenvPython
@@ -790,7 +790,7 @@ if ($DeployMode -eq "interactive") {
       throw "Unsupported protocol: $protocol"
     }
     $proxyHost = Read-Host "Single IP host (e.g. 127.0.0.1)"
-    $proxyPort = Read-Host "Single IP port (e.g. 8080)"
+    $proxyPort = Read-Host "Single IP port (e.g. 6666)"
     $proxyUser = Read-Host "Single IP username (optional)"
     $proxyPass = Read-Host "Single IP password (optional)"
   }
@@ -813,7 +813,7 @@ if ($DeployMode -eq "interactive") {
   if (-not [string]::IsNullOrWhiteSpace($listenHostInput)) { $listenHost = $listenHostInput.Trim() }
   $listenPortInput = Read-Host "Listen port for proxy [3128]"
   if (-not [string]::IsNullOrWhiteSpace($listenPortInput)) { $listenPort = $listenPortInput.Trim() }
-  $webPortInput = Read-Host "Web listen port [8080]"
+  $webPortInput = Read-Host "Web listen port [6666]"
   if (-not [string]::IsNullOrWhiteSpace($webPortInput)) { $webPort = $webPortInput.Trim() }
 
   $adminUserInput = Read-Host "Admin user [admin]"

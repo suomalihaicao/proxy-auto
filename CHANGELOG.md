@@ -21,7 +21,7 @@ All notable changes to this project will be documented in this file.
 - Windows 一键部署脚本支持 `--start-only` 与 `--interactive` 参数，默认行为调整为非交互启动，配置由 Web 面板完成。
 - `setup.sh` 文档与参数透传补齐，默认启动不再阻塞在交互式代理配置。
 ### Changed
-- `deploy-windows.ps1` 新增默认非交互模式与公共设置兜底，减少首次部署在 8080/3128 拉起失败时人工误操作。
+- `deploy-windows.ps1` 新增默认非交互模式与公共设置兜底，减少首次部署在 6666/3128 拉起失败时人工误操作。
 - Windows 默认启动流程改为新建终端窗口运行服务，并尝试自动打开 Web 登录页。
 ### Fixed
 - Windows 非交互部署时若未提供代理参数不再要求输入 `Upstream proxy mode`，可直接拉起 Web 服务。
@@ -73,12 +73,12 @@ All notable changes to this project will be documented in this file.
 ### Added
 - 部署入口 `deploy-linux.sh` 支持默认非交互启动模式（`--start-only`），不再要求在部署时填写代理参数。
 - 支持 `--interactive` 模式用于一次性重建 `settings.json` 与管理员信息。
-- `restart-public-8080.sh` 新增启动前默认管理员兜底逻辑，未登录环境也可自动补齐 `admin/admin123`。
+- `restart-public-6666.sh` 新增启动前默认管理员兜底逻辑，未登录环境也可自动补齐 `admin/admin123`。
 - 文档更新，明确启动与参数化部署行为。
 
 ### Changed
-- `restart-public-8080.sh` 移除硬编码项目路径，改为脚本路径动态定位。
-- `restart-public-8080.sh` 不再强制覆盖已配置的 `web_host/web_port`，保留 Web 面板配置。
+- `restart-public-6666.sh` 移除硬编码项目路径，改为脚本路径动态定位。
+- `restart-public-6666.sh` 不再强制覆盖已配置的 `web_host/web_port`，保留 Web 面板配置。
 - `deploy-linux.sh` 支持无参数直接启动服务，减少重复配置步骤。
 
 ### Fixed

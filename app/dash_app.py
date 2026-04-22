@@ -872,7 +872,7 @@ def _load_system_panel(data):
         settings.get("listen_host", "0.0.0.0"),
         _to_int(settings.get("listen_port", 3128), 3128),
         settings.get("web_host", "0.0.0.0"),
-        _to_int(settings.get("web_port", 8080), 8080),
+        _to_int(settings.get("web_port", 6666), 6666),
         g_options,
         g_default,
         settings.get("allowed_client_ips", ""),
@@ -917,7 +917,7 @@ def _system_ops(
         settings.listen_host = (listen_host or "0.0.0.0").strip() or "0.0.0.0"
         settings.listen_port = _to_int(listen_port, 3128)
         settings.web_host = (web_host or "0.0.0.0").strip() or "0.0.0.0"
-        settings.web_port = _to_int(web_port, 8080)
+        settings.web_port = _to_int(web_port, 6666)
         settings.allowed_client_ips = (allow_ips or "").strip()
         gid = _to_int(default_gid, 0)
         groups = {_to_int(g["id"]) for g in [_row_to_dict(g) for g in list_proxy_groups(DB_PATH)]}

@@ -68,7 +68,7 @@ fi
 
 if [[ "$proxy_mode" == "single_ip" ]]; then
   read -r -p "代理地址 (例如: 127.0.0.1): " proxy_host
-  read -r -p "代理端口 (例如: 8080): " proxy_port
+  read -r -p "代理端口 (例如: 6666): " proxy_port
   read -r -p "代理用户名(可空): " proxy_user
   read -r -s -p "代理密码(可空): " proxy_pass
   echo
@@ -112,8 +112,8 @@ listen_host="${listen_host:-0.0.0.0}"
 read -r -p "代理监听端口 [3128]: " listen_port
 listen_port="${listen_port:-3128}"
 
-read -r -p "Web 监听端口 [8080]: " web_port
-web_port="${web_port:-8080}"
+read -r -p "Web 监听端口 [6666]: " web_port
+web_port="${web_port:-6666}"
 
   read -r -p "管理员用户名 [admin]: " admin_user
   admin_user="${admin_user:-admin}"
@@ -214,7 +214,7 @@ fi
 export PYTHONPATH="$BASE_DIR:${PYTHONPATH:-}"
 
 web_host="0.0.0.0"
-web_port="8080"
+web_port="6666"
 
 if [[ -f "$BASE_DIR/data/settings.json" ]]; then
   readarray -t settings_lines < <("$PY" - <<PY
@@ -227,7 +227,7 @@ try:
 except Exception:
     cfg = {}
 print(cfg.get("web_host", "0.0.0.0"))
-print(cfg.get("web_port", 8080))
+print(cfg.get("web_port", 6666))
 PY
   )
   if [[ -n "${settings_lines[0]:-}" ]]; then
@@ -253,21 +253,21 @@ EOF
   chmod +x "$BASE_DIR/run.sh"
 fi
 
-read -r -p "是否尝试放行 Web 与代理端口（8080/3128）？[y/N]: " open_ports
+read -r -p "是否尝试放行 Web 与代理端口（6666/3128）？[y/N]: " open_ports
 if [[ "$open_ports" =~ ^[Yy]$ ]]; then
   if command -v ufw >/dev/null 2>&1; then
-    sudo ufw allow 8080/tcp || true
+    sudo ufw allow 6666/tcp || true
     sudo ufw allow 3128/tcp || true
-    echo "已尝试通过 ufw 放行 8080/tcp 与 3128/tcp"
+    echo "已尝试通过 ufw 放行 6666/tcp 与 3128/tcp"
   elif command -v firewall-cmd >/dev/null 2>&1; then
-    sudo firewall-cmd --zone=public --add-port=8080/tcp --permanent || true
+    sudo firewall-cmd --zone=public --add-port=6666/tcp --permanent || true
     sudo firewall-cmd --zone=public --add-port=3128/tcp --permanent || true
     sudo firewall-cmd --reload || true
-    echo "已尝试通过 firewalld 放行 8080/tcp 与 3128/tcp"
+    echo "已尝试通过 firewalld 放行 6666/tcp 与 3128/tcp"
   elif command -v iptables >/dev/null 2>&1; then
-    sudo iptables -C INPUT -p tcp --dport 8080 -j ACCEPT || sudo iptables -I INPUT -p tcp --dport 8080 -j ACCEPT
+    sudo iptables -C INPUT -p tcp --dport 6666 -j ACCEPT || sudo iptables -I INPUT -p tcp --dport 6666 -j ACCEPT
     sudo iptables -C INPUT -p tcp --dport 3128 -j ACCEPT || sudo iptables -I INPUT -p tcp --dport 3128 -j ACCEPT
-    echo "已尝试通过 iptables 放行 8080/tcp 与 3128/tcp"
+    echo "已尝试通过 iptables 放行 6666/tcp 与 3128/tcp"
   else
     echo "未检测到 ufw/firewalld/iptables，跳过端口放行"
   fi

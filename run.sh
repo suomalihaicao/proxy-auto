@@ -13,7 +13,7 @@ fi
 export PYTHONPATH="$BASE_DIR:${PYTHONPATH:-}"
 
 web_host="0.0.0.0"
-web_port="8080"
+web_port="6666"
 
 if [[ -f "$BASE_DIR/data/settings.json" ]]; then
   readarray -t settings_lines < <("$PY" - <<PY
@@ -26,7 +26,7 @@ try:
 except Exception:
     cfg = {}
 print(cfg.get("web_host", "0.0.0.0"))
-print(cfg.get("web_port", 8080))
+print(cfg.get("web_port", 6666))
 PY
   )
   if [[ -n "${settings_lines[0]:-}" ]]; then

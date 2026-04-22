@@ -6,7 +6,7 @@ DATA_DIR="$BASE_DIR/data"
 SETTINGS_FILE="$DATA_DIR/settings.json"
 LOG_FILE="/tmp/domain-proxy-manager.log"
 SERVICE_NAME="domain-proxy-manager"
-PID_FILE="/tmp/domain-proxy-manager-8080.pid"
+PID_FILE="/tmp/domain-proxy-manager-6666.pid"
 DB_PATH="$DATA_DIR/app.db"
 DEFAULT_ADMIN_USER="${PROXY_ADMIN_USER:-admin}"
 DEFAULT_ADMIN_PASSWORD="${PROXY_ADMIN_PASSWORD:-admin123}"
@@ -104,7 +104,7 @@ from pathlib import Path
 settings_path = Path(os.environ["BASE_DIR"]) / "data" / "settings.json"
 cfg = json.loads(settings_path.read_text(encoding="utf-8"))
 cfg.setdefault("web_host", "0.0.0.0")
-cfg["web_port"] = int(cfg.get("web_port", 8080))
+cfg["web_port"] = int(cfg.get("web_port", 6666))
 if "proxy_mode" not in cfg:
     cfg["proxy_mode"] = "direct"
 cfg.setdefault("proxy_protocol", "http")
@@ -130,7 +130,7 @@ else
   "listen_host": "0.0.0.0",
   "listen_port": 3128,
   "web_host": "0.0.0.0",
-  "web_port": 8080,
+  "web_port": 6666,
   "proxy_mode": "direct",
   "proxy_host": "",
   "proxy_port": 0,
@@ -184,9 +184,9 @@ else
   echo "已启动临时前台进程 (pid: $pid)"
 
   echo "监听检查:"
-  if wait_for_health "127.0.0.1" 8080; then
+  if wait_for_health "127.0.0.1" 6666; then
     if command -v ss >/dev/null 2>&1; then
-      ss -lntp | grep -E '(:8080|:3128)' || true
+      ss -lntp | grep -E '(:6666|:3128)' || true
     else
       echo "  未检测到 ss 工具，已跳过监听列表输出"
     fi
@@ -197,13 +197,13 @@ else
       echo "最新日志："
       tail -n 60 "$LOG_FILE" 2>/dev/null || true
     else
-      echo "启动失败: 8080 健康检查超时且进程退出"
+      echo "启动失败: 6666 健康检查超时且进程退出"
       echo "日志尾部："
       tail -n 80 "$LOG_FILE" 2>/dev/null || true
       echo
       echo "排查建议："
       echo "1. 检查服务进程是否在运行：ps -ef | grep uvicorn"
-      echo "2. 手动前台启动看直接报错：cd $BASE_DIR && ./.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8080"
+      echo "2. 手动前台启动看直接报错：cd $BASE_DIR && ./.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 6666"
       exit 1
     fi
   fi
