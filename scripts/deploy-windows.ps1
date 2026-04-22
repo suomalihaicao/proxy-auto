@@ -278,7 +278,7 @@ function Start-ServiceInTerminal {
       "-ExecutionPolicy",
       "Bypass",
       "-Command",
-      "Set-Location '$BaseDir'; $serviceCommand"
+      "Set-Location `"$BaseDir`"; $serviceCommand"
     ) -PassThru
   }
 
