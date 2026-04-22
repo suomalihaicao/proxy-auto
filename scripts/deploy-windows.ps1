@@ -290,6 +290,45 @@ function Invoke-Python {
   }
 }
 
+function Ensure-VenvPip {
+  param(
+    [string]$VenvPython,
+    [string]$VenvPip,
+    [string]$EnvToolsDir
+  )
+
+  if (Test-Path -Path $VenvPip) {
+    return
+  }
+
+  Write-DeployLog "虚拟环境缺少 pip，尝试通过 ensurepip 修复..."
+  try {
+    & $VenvPython -m ensurepip --upgrade | Out-Null
+    if (Test-Path -Path $VenvPip) {
+      return
+    }
+  } catch {
+    Write-DeployLog "ensurepip 修复失败，继续尝试官方脚本..."
+  }
+
+  $getPipScript = Join-Path $EnvToolsDir "get-pip.py"
+  try {
+    Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPipScript -UseBasicParsing -MaximumRedirection 10 | Out-Null
+  } catch {
+    throw "无法下载 get-pip.py，无法完成 pip 安装"
+  }
+
+  try {
+    & $VenvPython $getPipScript --no-warn-script-location | Out-Null
+  } catch {
+    throw "get-pip.py 执行失败，无法在虚拟环境中安装 pip"
+  }
+
+  if (-not (Test-Path -Path $VenvPip)) {
+    throw "虚拟环境 pip 安装失败"
+  }
+}
+
 $pythonInfo = Ensure-PythonRuntime
 if ([string]::IsNullOrWhiteSpace($pythonInfo)) {
   throw "未检测到 Python3.10+，自动化安装未完成，请确认网络与权限后重试。"
@@ -330,7 +369,7 @@ if (-not (Test-Path -Path $VenvDir)) {
 $PipExe = Join-Path $VenvDir "Scripts\pip.exe"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 if (-not (Test-Path $PipExe)) {
-  throw "虚拟环境初始化异常，未找到 pip。"
+  Ensure-VenvPip -VenvPython $VenvPython -VenvPip $PipExe -EnvToolsDir $EnvToolsDir
 }
 
 $Env:PIP_CACHE_DIR = $PipCacheDir

@@ -30,6 +30,21 @@ chmod +x scripts/install.sh
 ./scripts/install.sh
 ```
 
+新增统一入口（推荐）：
+
+```bash
+cd /root/domain-proxy-manager
+chmod +x setup.sh
+./setup.sh
+```
+
+Windows 下可用：
+
+```powershell
+Set-Location C:\path\to\domain-proxy-manager
+bash setup.sh --windows
+```
+
 ## 一键部署
 
 Linux 下直接运行：
@@ -105,6 +120,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 - `scripts/fix-access.sh`：外网访问排查脚本（若创建）
 - `scripts/package-migration.sh`：导出迁移包
 - `scripts/restore-migration.sh`：恢复迁移包
+- `setup.sh`：统一部署入口（自动选择 Linux/Windows 脚本）
 
 ## 迁移
 

@@ -9,6 +9,7 @@ DB_PATH="$DATA_DIR/app.db"
 ENV_TOOLS_DIR="$BASE_DIR/env_tools"
 ENV_TOOLS_BIN="$ENV_TOOLS_DIR/bin"
 LOCAL_PYTHON_BIN="$ENV_TOOLS_BIN/python3"
+GET_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
 VENV_DIR="$BASE_DIR/.venv"
 PIP_CACHE_DIR="$ENV_TOOLS_DIR/pip-cache"
 LOG_TAG="[deploy]"
@@ -60,6 +61,105 @@ python_acceptable() {
 python_venv_ok() {
   local target="$1"
   "$target" -m venv --help >/dev/null 2>&1
+}
+
+python_has_pip() {
+  local py="$1"
+  "$py" -m pip --version >/dev/null 2>&1
+}
+
+record_python_to_env_tools() {
+  local source_python="$1"
+  if ln -sf "$source_python" "$LOCAL_PYTHON_BIN" 2>/dev/null; then
+    return 0
+  fi
+
+  if [[ ! -x "$source_python" ]]; then
+    return 1
+  fi
+
+  cat > "$LOCAL_PYTHON_BIN" <<EOF
+#!/usr/bin/env sh
+exec "$source_python" "\$@"
+EOF
+  chmod +x "$LOCAL_PYTHON_BIN"
+  return 0
+}
+
+download_file() {
+  local url="$1"
+  local target="$2"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --max-time 20 "$url" -o "$target"
+    return 0
+  fi
+
+  if command -v wget >/dev/null 2>&1; then
+    wget -q -O "$target" "$url"
+    return 0
+  fi
+
+  return 1
+}
+
+ensure_venv_pip() {
+  local venv_dir="$1"
+  local python_bin="$venv_dir/bin/python"
+  local pip_bin="$venv_dir/bin/pip"
+  local get_pip_script="$ENV_TOOLS_DIR/get-pip.py"
+
+  if [[ ! -x "$python_bin" ]]; then
+    log "虚拟环境解释器异常: $python_bin"
+    return 1
+  fi
+
+  if python_has_pip "$python_bin"; then
+    if [[ -x "$pip_bin" ]]; then
+      echo "$pip_bin"
+      return 0
+    fi
+    pip_bin="$venv_dir/bin/pip3"
+    if [[ -x "$pip_bin" ]]; then
+      echo "$pip_bin"
+      return 0
+    fi
+  fi
+
+  log "虚拟环境缺少 pip，尝试通过 ensurepip 修复..."
+  if "$python_bin" -m ensurepip --upgrade >/dev/null 2>&1; then
+    if python_has_pip "$python_bin"; then
+      if [[ -x "$venv_dir/bin/pip" ]]; then
+        echo "$venv_dir/bin/pip"
+        return 0
+      fi
+      if [[ -x "$venv_dir/bin/pip3" ]]; then
+        echo "$venv_dir/bin/pip3"
+        return 0
+      fi
+    fi
+  fi
+
+  log "ensurepip 修复失败，准备从官方脚本下载补齐 pip（保存到 env_tools）..."
+  mkdir -p "$ENV_TOOLS_DIR"
+  download_file "$GET_PIP_URL" "$get_pip_script" || {
+    log "无法下载 get-pip.py，请检查网络：$GET_PIP_URL"
+    return 1
+  }
+  "$python_bin" "$get_pip_script" --no-warn-script-location >/dev/null
+  if python_has_pip "$python_bin"; then
+    if [[ -x "$venv_dir/bin/pip" ]]; then
+      echo "$venv_dir/bin/pip"
+      return 0
+    fi
+    if [[ -x "$venv_dir/bin/pip3" ]]; then
+      echo "$venv_dir/bin/pip3"
+      return 0
+    fi
+  fi
+
+  log "pip 安装后仍不可用，请手动检查当前 Python 环境"
+  return 1
 }
 
 ensure_tool_cmd() {
@@ -158,8 +258,8 @@ ensure_python_runtime() {
         ensure_tool_cmd python3-venv python3-venv || true
       fi
       if python_venv_ok "$sys_py"; then
-        ln -sf "$sys_py" "$LOCAL_PYTHON_BIN"
         PYTHON_BIN="$sys_py"
+        record_python_to_env_tools "$sys_py"
         log "已识别系统 Python: $PYTHON_BIN（已记录到 $LOCAL_PYTHON_BIN）"
         return 0
       fi
@@ -191,7 +291,7 @@ ensure_python_runtime() {
     local sys_py
     sys_py="$(command -v python3)"
     if python_venv_ok "$sys_py"; then
-      ln -sf "$sys_py" "$LOCAL_PYTHON_BIN"
+      record_python_to_env_tools "$sys_py"
       PYTHON_BIN="$sys_py"
       log "Python 安装完成，使用: $PYTHON_BIN"
       return 0
@@ -388,13 +488,18 @@ if [[ ! -x "$VENV_DIR/bin/python" ]]; then
   log "未检测到现有虚拟环境，正在创建 $VENV_DIR ..."
   "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
+if ! PYTHON_BIN_FOR_PIP="$(ensure_venv_pip "$VENV_DIR")"; then
+  log "未能修复虚拟环境里的 pip，退出部署"
+  exit 1
+fi
+VENV_PIP="$PYTHON_BIN_FOR_PIP"
 
 PIP_INDEX="$(select_fastest_index)"
 export SETTINGS_FILE
 
 log "安装依赖到项目虚拟环境（cache: $PIP_CACHE_DIR）"
-"$VENV_DIR/bin/pip" install --disable-pip-version-check --no-input --upgrade pip -i "$PIP_INDEX"
-"$VENV_DIR/bin/pip" install --disable-pip-version-check --no-input -i "$PIP_INDEX" -r "$BASE_DIR/requirements.txt"
+"$VENV_PIP" install --disable-pip-version-check --no-input --upgrade pip -i "$PIP_INDEX"
+"$VENV_PIP" install --disable-pip-version-check --no-input -i "$PIP_INDEX" -r "$BASE_DIR/requirements.txt"
 
 read -r -p "上游代理模式 [single_ip/api/bigdata_api/direct] (回车默认 single_ip): " proxy_mode
 proxy_mode="${proxy_mode:-single_ip}"
