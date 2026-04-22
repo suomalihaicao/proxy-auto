@@ -18,6 +18,7 @@ $MinimumPythonMajor = 3
 $MinimumPythonMinor = 10
 $PythonVersion = $null
 $DeployMode = "start_only"
+$NonInteractiveDefault = (($env:PROXY_AUTO_NON_INTERACTIVE -eq "1") -and $env:PROXY_AUTO_NON_INTERACTIVE -ne $null)
 
 New-Item -ItemType Directory -Force -Path $DataDir, $EnvToolsDir, $EnvToolsBin, $PipCacheDir | Out-Null
 if ($PSVersionTable.PSVersion.Major -lt 5) {
@@ -52,6 +53,14 @@ foreach ($arg in $args) {
       exit 1
     }
   }
+}
+
+if ($NonInteractiveDefault -and $DeployMode -ne "interactive") {
+  $DeployMode = "start_only"
+}
+
+if ($DeployMode -eq "start_only") {
+  Write-DeployLog "当前为非交互模式：跳过终端内代理参数输入，服务启动后请到 Web 面板配置"
 }
 
 function Parse-IntValue {

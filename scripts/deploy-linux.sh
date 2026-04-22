@@ -55,6 +55,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "${PROXY_AUTO_NON_INTERACTIVE:-0}" == "1" && "$DEPLOY_MODE" != "interactive" ]]; then
+  DEPLOY_MODE="start_only"
+fi
+
+if [[ "$DEPLOY_MODE" == "start_only" ]]; then
+  log "当前为非交互模式：跳过终端内代理参数输入，服务启动后请到 Web 面板配置"
+fi
+
 log "启动部署前环境检查..."
 log "Linux 最低要求: Bash + Python ${PYTHON_REQ_MAJOR}.${PYTHON_REQ_MINOR}+（含 venv）+ curl 或 wget + git（可选）"
 log "项目工具目录: $ENV_TOOLS_DIR（工具、下载器与 pip 缓存将放在此目录）"

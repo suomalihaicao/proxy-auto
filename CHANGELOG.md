@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 - Windows 默认启动流程改为新建终端窗口运行服务，并尝试自动打开 Web 登录页。
 ### Fixed
 - Windows 非交互部署时若未提供代理参数不再要求输入 `Upstream proxy mode`，可直接拉起 Web 服务。
+- `setup.sh` 默认行为修复为始终注入 `--start-only`，避免因参数透传异常导致进入交互式代理模式选择。
+- `setup.sh` 会通过 `PROXY_AUTO_NON_INTERACTIVE` 强制传递给部署脚本，防止从 Git Bash 间接调用时误进入交互式参数页。
 
 ## [1.0.3] - 2026-04-22
 

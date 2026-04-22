@@ -48,6 +48,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$DEPLOY_MODE" == "--interactive" ]]; then
+  unset PROXY_AUTO_NON_INTERACTIVE || true
+else
+  export PROXY_AUTO_NON_INTERACTIVE=1
+fi
+
 DEPLOY_ARGS=("$DEPLOY_MODE")
 
 if [[ "$RUN_WINDOWS" -eq 1 ]]; then
