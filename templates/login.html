@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>代理管理登录</title>
+  <link rel="stylesheet" href="{{ request.url_for('static', path='login.css') }}" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>域名代理管理</h1>
+    <p>请先登录</p>
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/login">
+      <label for="username">用户名</label>
+      <input id="username" name="username" required />
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password" required />
+      <button type="submit">登录</button>
+    </form>
+  </div>
+</body>
+</html>

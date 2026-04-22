@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>域名代理网关管理</title>
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+    crossorigin="anonymous"
+  />
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"
+    rel="stylesheet"
+    crossorigin="anonymous"
+  />
+  <link rel="stylesheet" href="{{ request.url_for('static', path='dashboard.css') }}" />
+</head>
+<body>
+  {% set rule_kind_map = {'exact': '精确', 'suffix': '后缀', 'keyword': '关键词'} %}
+  {% set proxy_mode_map = {'direct': '直连', 'single_ip': '单节点', 'api': 'API 获取', 'bigdata_api': '内置 BigData'} %}
+  {% set protocol_map = {'http': 'HTTP', 'socks5': 'SOCKS5'} %}
+  <header class="app-top">
+    <div class="container-xl">
+      <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+        <div class="brand-mark d-flex align-items-center">
+          <span class="dot"></span>
+          域名代理网关管理
+          <span class="ms-2 fs-6 fw-normal text-secondary">v2</span>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <span class="text-secondary">当前用户：</span>
+          <span class="fw-semibold">{{ user }}</span>
+          <a class="btn btn-sm btn-outline-light" href="/logout">退出登录</a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="main-shell">
+    <div class="container-xl">
+      <div class="row g-4">
+        <aside class="col-12 col-lg-3 sidebar-col">
+          <div class="panel-card">
+            <div class="card-header fw-semibold fs-6">
+              <i class="bi bi-grid-3x3-gap-fill me-2"></i>
+              管理模块
+            </div>
+            <div class="p-3 side-nav d-grid gap-2">
+              <button
+                class="nav-link text-start"
+                type="button"
+                data-tab="domains"
+                id="tab-domains"
+              >
+                <i class="bi bi-globe me-2"></i>域名配置（规则）
+              </button>
+              <button
+                class="nav-link text-start"
+                type="button"
+                data-tab="proxies"
+                id="tab-proxies"
+              >
+                <i class="bi bi-hdd-network me-2"></i>拨号设置
+              </button>
+              <button
+                class="nav-link text-start"
+                type="button"
+                data-tab="groups"
+                id="tab-groups"
+              >
+                <i class="bi bi-diagram-3 me-2"></i>分组管理
+              </button>
+              <button
+                class="nav-link text-start"
+                type="button"
+                data-tab="system"
+                id="tab-system"
+              >
+                <i class="bi bi-gear me-2"></i>系统设置
+              </button>
+            </div>
+            <div class="p-3 border-top" style="border-color: var(--line) !important;">
+              <div class="text-secondary small">运行摘要</div>
+              <div class="d-flex justify-content-between mt-2"><span class="text-secondary">代理监听</span><span>{{ settings.listen_host }}:{{ settings.listen_port }}</span></div>
+              <div class="d-flex justify-content-between mt-1"><span class="text-secondary">Web 监听</span><span>{{ settings.web_host }}:{{ settings.web_port }}</span></div>
+              <div class="d-flex justify-content-between mt-1"><span class="text-secondary">分组数量</span><span>{{ settings.proxy_groups | length }}</span></div>
+            </div>
+          </div>
+          {% set error_map = {
+            "pattern": "请输入域名规则",
+            "kind": "请先选择匹配类型",
+            "group": "请选择要绑定的代理组",
+            "group_required": "规则组不能为空",
+            "group_invalid": "非法的代理组",
+            "group_not_exist": "代理组不存在",
+            "group_name": "代理组名称不能为空",
+            "group_exists": "代理组名已存在",
+            "group_not_found": "代理组不存在",
+            "update_failed": "保存失败，请重试",
+            "user_input": "用户名和密码不能为空",
+            "user_exists": "用户名已存在",
+            "pwd_empty": "新密码不能为空",
+            "user_not_found": "用户不存在",
+            "single_ip_missing_host": "单节点模式需要填写代理地址",
+            "single_ip_invalid_pool": "单节点模式代理池解析失败，请按 ip:端口 或 ip:端口:账号:密码 逐行填写",
+            "api_missing_url": "API 模式需要填写 API 地址",
+            "bigdata_missing_url": "BigData 模式需要填写至少一个 API 地址",
+            "batch_no_selection": "请先选择要操作的规则",
+            "batch_target_invalid": "请选择要移动到的目标分组"
+          } %}
+          {% if query_error %}
+            <div class="alert alert-danger mt-3 mb-0">
+              {{ error_map.get(query_error, query_error) }}
+            </div>
+          {% endif %}
+        </aside>
+
+        <main class="col-12 col-lg-9">
+          <section id="panel-domains" class="panel-card fade-in" style="display:none;">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <div>
+                <div class="fw-semibold">域名配置（规则）</div>
+                <div class="small text-secondary">左侧分组树，右侧维护对应域名规则</div>
+              </div>
+            </div>
+
+            <div class="p-3">
+              <form class="row g-3 align-items-end" method="post" action="/rules">
+                <div class="col-12 col-md-6">
+                  <label for="rule-pattern" class="form-label">域名规则</label>
+                  <input id="rule-pattern" name="pattern" class="form-control" placeholder="如：api.example.com / *.example.com / paypal" required />
+                </div>
+                <div class="col-12 col-md-3">
+                  <label for="rule-kind" class="form-label">匹配类型</label>
+                  <select id="rule-kind" name="kind" class="form-select">
+                    <option value="exact">精确</option>
+                    <option value="suffix">后缀</option>
+                    <option value="keyword">关键词</option>
+                  </select>
+                </div>
+                <div class="col-12 col-md-3">
+                  <label for="group-id" class="form-label">所属代理组</label>
+                  <select id="group-id" name="group_id" class="form-select">
+                    {% for g in settings.proxy_groups %}
+                      <option value="{{ g.id }}">{{ g.name }}（{{ g.id }}）</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-12 d-flex gap-2 flex-wrap">
+                  <button class="btn btn-primary" type="submit">新增规则</button>
+                  <button class="btn btn-outline-light" type="button" onclick="quickFillExact()">快速精确</button>
+                  <button class="btn btn-outline-light" type="button" onclick="quickFillSuffix()">快捷后缀（*.example.com）</button>
+                  <button class="btn btn-outline-light" type="button" onclick="quickFillKeyword()">快捷关键词</button>
+                </div>
+              </form>
+
+              <div class="mt-3">
+                <label for="rule-group-filter" class="form-label mb-1">按分组筛选域名规则</label>
+                <div class="d-flex gap-2 flex-wrap">
+                  <select id="rule-group-filter" class="form-select w-auto">
+                    <option value="0">全部分组</option>
+                    {% for g in settings.proxy_groups %}
+                      <option value="{{ g.id }}" {% if active_rule_group == g.id %}selected{% endif %}>{{ g.name }}（{{ group_rule_counts.get(g.id, 0) }}条）</option>
+                    {% endfor %}
+                  </select>
+                </div>
+              </div>
+
+              <div class="mt-3 text-secondary" style="line-height: 2;">
+                <span class="ghost-chip">精确</span>
+                <span class="ghost-chip">后缀</span>
+                <span class="ghost-chip">关键词</span>
+                示例：<span class="ghost-chip">api.example.com</span>
+                <span class="ghost-chip">*.example.com</span>
+                <span class="ghost-chip">paypal</span>
+              </div>
+
+              <div class="rule-org-layout mt-3">
+                <aside class="rule-group-tree soft-panel">
+                  <div class="fw-semibold mb-2">分组结构</div>
+                  <button
+                    type="button"
+                    class="group-tree-node"
+                    data-group-id="0"
+                    data-group-name="全部分组"
+                  >
+                    <span class="me-auto">全部分组</span>
+                    <span class="tree-count">{{ rules | length }}条</span>
+                  </button>
+                  {% for g in settings.proxy_groups %}
+                    <button
+                      type="button"
+                      class="group-tree-node"
+                      data-group-id="{{ g.id }}"
+                      data-group-name="{{ g.name }}（{{ g.id }}）"
+                    >
+                      <span class="me-auto">{{ g.name }}</span>
+                      <span class="tree-count">{{ group_rule_counts.get(g.id, 0) }}条</span>
+                    </button>
+                  {% else %}
+                    <div class="text-secondary">暂无分组，请先在拨号设置里创建分组</div>
+                  {% endfor %}
+                </aside>
+
+                <div class="rule-content soft-panel">
+                  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                    <div class="fw-semibold">当前分组：<span id="rule-current-group-label">全部分组</span></div>
+                    <div class="text-secondary small">
+                      可见 <span id="rule-visible-count">0</span> 条 / 已选 <span id="rule-selected-count">0</span> 条
+                    </div>
+                  </div>
+
+                  <form id="batch-rule-form" method="post" action="/rules/bulk/delete" class="rule-batch-form">
+                    <input type="hidden" id="batch-current-group" name="current_group" value="{{ active_rule_group or 0 }}" />
+                    <input type="hidden" id="batch-target-group" name="target_group" value="0" />
+
+                    <div class="rule-batch-toolbar">
+                      <div class="d-flex align-items-center gap-2">
+                        <input id="rule-select-all" type="checkbox" class="form-check-input" />
+                        <label for="rule-select-all" class="small text-secondary">可见规则全选</label>
+                      </div>
+
+                      <div class="d-flex align-items-center gap-2">
+                        <button type="button" id="batch-delete-selected" class="btn btn-sm btn-outline-danger">
+                          批量删除
+                        </button>
+                        <select id="batch-target-select" class="form-select form-select-sm">
+                          {% for g in settings.proxy_groups %}
+                            <option value="{{ g.id }}">移到 {{ g.name }}</option>
+                          {% else %}
+                            <option value="0">无可用分组</option>
+                          {% endfor %}
+                        </select>
+                        <button type="button" id="batch-move-selected" class="btn btn-sm btn-outline-light">
+                          批量移动
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="table-responsive table-wrap">
+                      <table class="table table-sm align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th style="width: 54px;">选择</th>
+                            <th style="width: 70px;">编号</th>
+                            <th style="width: 100px;">类型</th>
+                            <th>规则</th>
+                            <th style="width: 150px;">代理组</th>
+                            <th style="width: 110px;">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody id="rule-table-body">
+                          {% for r in rules %}
+                            <tr class="rule-row" data-rule-group="{{ r.group_id }}">
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  class="form-check-input rule-row-checkbox"
+                                  name="rule_ids"
+                                  value="{{ r.id }}"
+                                />
+                              </td>
+                              <td>{{ r.id }}</td>
+                              <td><span class="tag">{{ rule_kind_map.get(r.kind, r.kind) }}</span></td>
+                              <td><span class="code">{{ r.pattern }}</span></td>
+                              <td>{{ r.group_name or "未分组" }}（{{ r.group_id }}）</td>
+                              <td>
+                                <button
+                                  type="button"
+                                  class="btn btn-sm btn-outline-danger rule-delete-btn"
+                                  data-rule-id="{{ r.id }}"
+                                >
+                                  删除
+                                </button>
+                              </td>
+                            </tr>
+                          {% else %}
+                            <tr class="rule-empty-row">
+                              <td colspan="6" class="text-secondary">暂无规则，先添加域名策略</td>
+                            </tr>
+                          {% endfor %}
+                          <tr id="rule-empty-match" class="d-none">
+                            <td colspan="6" class="text-secondary">当前分组暂无域名规则</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </form>
+                </div>
+              </div>
+
+              <form id="rule-delete-form" method="post" action="" class="d-none">
+                <input type="hidden" name="current_group" id="rule-delete-current-group" value="{{ active_rule_group or 0 }}" />
+              </form>
+            </div>
+          </section>
+
+          <section id="panel-proxies" class="panel-card fade-in" style="display:none;">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <div>
+                <div class="fw-semibold">拨号设置</div>
+                <div class="small text-secondary">每个分组可单独配置转发方式与凭据</div>
+              </div>
+            </div>
+
+            <div class="p-3">
+              <div class="soft-panel mb-3">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <div class="fw-semibold">新增代理组</div>
+                </div>
+                <form id="add-proxy-group" method="post" action="/proxy-groups" class="row g-3">
+                  <div class="col-md-6">
+                    <label for="group-name-new" class="form-label">代理组名</label>
+                    <input id="group-name-new" name="name" class="form-control" placeholder="例如：高优先API组" required />
+                  </div>
+                  <div class="col-md-3">
+                    <label for="proxy-mode-new" class="form-label">转发模式</label>
+                    <select id="proxy-mode-new" name="proxy_mode" class="form-select proxy-mode-select" data-mode-root="add">
+                      <option value="direct">直连（命中后直接放行）</option>
+                      <option value="single_ip">单节点</option>
+                      <option value="api">API 获取</option>
+                      <option value="bigdata_api">BigData 内置</option>
+                    </select>
+                  </div>
+                  <div class="col-md-3">
+                    <label for="proxy-protocol-new" class="form-label">上游协议</label>
+                    <select id="proxy-protocol-new" name="proxy_protocol" class="form-select">
+                      <option value="http">HTTP</option>
+                      <option value="socks5">SOCKS5</option>
+                    </select>
+                  </div>
+
+                  <div class="mode-panel" data-form="add" data-mode="direct">命中该组后直接放行，不调用上游代理。</div>
+                  <div class="mode-panel d-none" data-form="add" data-mode="single_ip">
+                    <div class="row g-3 mode-grid">
+                      <div class="col-md-6"><label for="proxy-host-new" class="form-label">单节点地址（兼容）</label><input id="proxy-host-new" name="proxy_host" class="form-control" placeholder="127.0.0.1" /></div>
+                      <div class="col-md-3"><label for="proxy-port-new" class="form-label">单节点端口（兼容）</label><input id="proxy-port-new" name="proxy_port" class="form-control" placeholder="1080" /></div>
+                      <div class="col-md-3"><label for="proxy-username-new" class="form-label">单节点用户名（兼容）</label><input id="proxy-username-new" name="proxy_username" class="form-control" placeholder="可空" /></div>
+                      <div class="col-md-4"><label for="proxy-password-new" class="form-label">单节点密码（兼容）</label><input id="proxy-password-new" name="proxy_password" type="password" class="form-control" placeholder="可空" /></div>
+                      <div class="col-12">
+                        <label for="proxy-pool-new" class="form-label">代理地址池（每行 ip:端口:账号:密码）</label>
+                        <div class="mode-tip">有配置地址池时优先使用池内地址，未配置时使用上方单节点信息。</div>
+                        <textarea id="proxy-pool-new" name="proxy_pool" class="form-control" rows="3" placeholder="例如：&#13;&#10;1.2.3.4:1080:user:pass&#13;&#10;2.2.2.2:1080&#13;&#10;3.3.3.3:1080:admin"></textarea>
+                      </div>
+                      <div class="col-12">
+                        <div class="form-check">
+                          <input id="proxy-round-robin-new" class="form-check-input" type="checkbox" name="proxy_round_robin" value="1" />
+                          <label class="form-check-label text-secondary" for="proxy-round-robin-new">
+                            每次请求自动轮换上游 IP
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="mode-panel d-none" data-form="add" data-mode="api">
+                    <div class="row g-3 mode-grid">
+                      <div class="col-md-7"><label for="api-url-new" class="form-label">API 地址</label><input id="api-url-new" name="api_url" class="form-control" placeholder="https://api.example.com/get_proxy" /></div>
+                      <div class="col-md-3"><label for="api-method-new" class="form-label">请求方法</label><select id="api-method-new" name="api_method" class="form-select"><option value="GET">GET</option><option value="POST">POST</option><option value="PUT">PUT</option><option value="PATCH">PATCH</option></select></div>
+                      <div class="col-md-2"><label for="api-timeout-new" class="form-label">超时(秒)</label><input id="api-timeout-new" name="api_timeout" class="form-control" value="8" /></div>
+                      <div class="col-md-3"><label for="api-cache-ttl-new" class="form-label">TTL(秒)</label><input id="api-cache-ttl-new" name="api_cache_ttl" class="form-control" value="20" /></div>
+                      <div class="col-12"><label for="api-headers-new" class="form-label">请求头（JSON）</label><textarea id="api-headers-new" name="api_headers" class="form-control" rows="2" placeholder='{"Authorization":"Bearer ..." }'></textarea></div>
+                      <div class="col-12"><label for="api-body-new" class="form-label">请求体（JSON）</label><textarea id="api-body-new" name="api_body" class="form-control" rows="2" placeholder='{"host": "..."}'></textarea></div>
+                      <div class="col-md-6"><label for="api-host-key-new" class="form-label">代理主机字段</label><input id="api-host-key-new" name="api_host_key" class="form-control" value="host" /></div>
+                      <div class="col-md-6"><label for="api-port-key-new" class="form-label">代理端口字段</label><input id="api-port-key-new" name="api_port_key" class="form-control" value="port" /></div>
+                      <div class="col-md-6"><label for="api-user-key-new" class="form-label">代理账号字段</label><input id="api-user-key-new" name="api_username_key" class="form-control" value="username" /></div>
+                      <div class="col-md-6"><label for="api-pass-key-new" class="form-label">代理密码字段</label><input id="api-pass-key-new" name="api_password_key" class="form-control" value="password" /></div>
+                      <div class="col-12"><label for="api-proxy-field-new" class="form-label">代理整体字段</label><input id="api-proxy-field-new" name="api_proxy_field" class="form-control" value="proxy" /></div>
+                    </div>
+                  </div>
+
+                  <div class="mode-panel d-none" data-form="add" data-mode="bigdata_api">
+                    <div class="row g-3 mode-grid">
+                      <div class="col-12"><label for="bigdata-url-new" class="form-label">BigData 地址（可与 API 互补）</label><input id="bigdata-url-new" name="bigdata_api_url" class="form-control" placeholder="https://bigdata.example.com/api" /></div>
+                      <div class="col-12"><label for="bigdata-token-new" class="form-label">访问令牌</label><input id="bigdata-token-new" name="bigdata_api_token" class="form-control" /></div>
+                    </div>
+                  </div>
+
+                  <div class="col-12">
+                    <button class="btn btn-primary" type="submit">新增分组</button>
+                  </div>
+                </form>
+              </div>
+
+              {% for g in settings.proxy_groups %}
+                <div class="proxy-group-card" id="proxy-group-card-{{ g.id }}">
+                  <div class="d-flex flex-wrap gap-2 align-items-start justify-content-between mb-2">
+                    <div>
+                      <div class="fw-semibold">{{ g.name }}</div>
+                      <div class="text-secondary small">分组编号 {{ g.id }}</div>
+                    </div>
+                    <span class="mode-badge"><i class="bi bi-router"></i>{{ proxy_mode_map.get(g.proxy_mode, g.proxy_mode) }}</span>
+                  </div>
+
+                  <div class="mb-2 text-secondary small d-flex gap-2 flex-wrap">
+                    {% if g.proxy_pool %}
+                      <span class="code">规则池: {{ (g.proxy_pool.replace('\r', '').split('\n')[0]) | truncate(48) }}</span>
+                    {% else %}
+                      <span class="code">{{ g.proxy_host or "-" }}</span>
+                      <span class="code">{{ g.proxy_port }}</span>
+                    {% endif %}
+                    <span class="code">协议：{{ protocol_map.get(g.proxy_protocol, g.proxy_protocol) }}</span>
+                    <span class="code">轮换：{{ "开启" if g.proxy_round_robin else "关闭" }}</span>
+                    <span class="code">已绑定规则：{{ group_rule_counts.get(g.id, 0) }} 条</span>
+                  </div>
+
+                  <div class="d-flex gap-2 flex-wrap">
+                    <a class="btn btn-sm btn-outline-light" href="/?tab=domains&rule_group={{ g.id }}">
+                      查看该组域名规则
+                    </a>
+                    <a class="btn btn-sm btn-outline-light" href="/?tab=groups">
+                      查看分组管理
+                    </a>
+                  </div>
+
+                  <details id="proxy-group-detail-{{ g.id }}">
+                    <summary>编辑该代理组</summary>
+                    <form method="post" action="/proxy-groups/{{ g.id }}/update" class="mt-3 row g-3">
+                      <input type="hidden" name="id" value="{{ g.id }}" />
+
+                      <div class="col-md-4">
+                        <label class="form-label">分组名称</label>
+                        <input name="name" class="form-control" value="{{ g.name }}" required />
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label">转发模式</label>
+                        <select
+                          name="proxy_mode"
+                          class="form-select proxy-mode-select"
+                          data-mode-root="proxy-group-{{ g.id }}"
+                        >
+                          <option value="direct" {% if g.proxy_mode == 'direct' %}selected{% endif %}>直连（命中直接放行）</option>
+                          <option value="single_ip" {% if g.proxy_mode == 'single_ip' %}selected{% endif %}>单节点</option>
+                          <option value="api" {% if g.proxy_mode == 'api' %}selected{% endif %}>API 获取</option>
+                          <option value="bigdata_api" {% if g.proxy_mode == 'bigdata_api' %}selected{% endif %}>BigData 内置</option>
+                        </select>
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label">上游协议</label>
+                        <select name="proxy_protocol" class="form-select">
+                          <option value="http" {% if g.proxy_protocol == 'http' %}selected{% endif %}>HTTP</option>
+                          <option value="socks5" {% if g.proxy_protocol == 'socks5' %}selected{% endif %}>SOCKS5</option>
+                        </select>
+                      </div>
+
+                      <div class="mode-panel" data-form="proxy-group-{{ g.id }}" data-mode="direct">该组命中后直接放行，不经过上游。</div>
+                      <div class="mode-panel d-none" data-form="proxy-group-{{ g.id }}" data-mode="single_ip">
+                        <div class="row g-3 mode-grid">
+                          <div class="col-md-6"><label class="form-label">单节点地址（兼容）</label><input name="proxy_host" class="form-control" value="{{ g.proxy_host }}" /></div>
+                          <div class="col-md-3"><label class="form-label">单节点端口（兼容）</label><input name="proxy_port" class="form-control" value="{{ g.proxy_port }}" /></div>
+                          <div class="col-md-3"><label class="form-label">单节点账号（兼容）</label><input name="proxy_username" class="form-control" value="{{ g.proxy_username }}" /></div>
+                          <div class="col-md-3"><label class="form-label">单节点密码（兼容）</label><input type="password" name="proxy_password" class="form-control" value="{{ g.proxy_password }}" /></div>
+                          <div class="col-12">
+                            <label class="form-label">代理地址池（每行 ip:端口:账号:密码）</label>
+                            <div class="mode-tip">有配置地址池时优先使用池内地址，未配置时使用上方单点地址。</div>
+                            <textarea name="proxy_pool" class="form-control" rows="3">{{ g.proxy_pool }}</textarea>
+                          </div>
+                          <div class="col-12">
+                            <div class="form-check">
+                              <input id="proxy-round-robin-{{ g.id }}" class="form-check-input" type="checkbox" name="proxy_round_robin" value="1" {% if g.proxy_round_robin %}checked{% endif %} />
+                              <label class="form-check-label text-secondary" for="proxy-round-robin-{{ g.id }}">
+                                每次请求自动轮换上游 IP
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="mode-panel d-none" data-form="proxy-group-{{ g.id }}" data-mode="api">
+                        <div class="row g-3 mode-grid">
+                          <div class="col-12"><label class="form-label">API 地址</label><input name="api_url" class="form-control" value="{{ g.api_url }}" /></div>
+                          <div class="col-md-3">
+                            <label class="form-label">请求方法</label>
+                            <select name="api_method" class="form-select">
+                              <option value="GET" {% if g.api_method == 'GET' %}selected{% endif %}>GET</option>
+                              <option value="POST" {% if g.api_method == 'POST' %}selected{% endif %}>POST</option>
+                              <option value="PUT" {% if g.api_method == 'PUT' %}selected{% endif %}>PUT</option>
+                              <option value="PATCH" {% if g.api_method == 'PATCH' %}selected{% endif %}>PATCH</option>
+                            </select>
+                          </div>
+                          <div class="col-md-3"><label class="form-label">API 超时（秒）</label><input name="api_timeout" class="form-control" value="{{ g.api_timeout }}" /></div>
+                          <div class="col-md-2"><label class="form-label">TTL（秒）</label><input name="api_cache_ttl" class="form-control" value="{{ g.api_cache_ttl }}" /></div>
+                          <div class="col-md-12"><label class="form-label">请求头（JSON）</label><textarea name="api_headers" class="form-control" rows="2">{{ g.api_headers }}</textarea></div>
+                          <div class="col-md-12"><label class="form-label">请求体（JSON）</label><textarea name="api_body" class="form-control" rows="2">{{ g.api_body }}</textarea></div>
+                          <div class="col-md-4"><label class="form-label">代理主机字段</label><input name="api_host_key" class="form-control" value="{{ g.api_host_key }}" /></div>
+                          <div class="col-md-4"><label class="form-label">代理端口字段</label><input name="api_port_key" class="form-control" value="{{ g.api_port_key }}" /></div>
+                          <div class="col-md-4"><label class="form-label">代理账号字段</label><input name="api_username_key" class="form-control" value="{{ g.api_username_key }}" /></div>
+                          <div class="col-md-4"><label class="form-label">代理密码字段</label><input name="api_password_key" class="form-control" value="{{ g.api_password_key }}" /></div>
+                          <div class="col-md-4"><label class="form-label">代理整体字段</label><input name="api_proxy_field" class="form-control" value="{{ g.api_proxy_field }}" /></div>
+                        </div>
+                      </div>
+
+                      <div class="mode-panel d-none" data-form="proxy-group-{{ g.id }}" data-mode="bigdata_api">
+                        <div class="row g-3 mode-grid">
+                          <div class="col-12"><label class="form-label">BigData 地址</label><input name="bigdata_api_url" class="form-control" value="{{ g.bigdata_api_url }}" /></div>
+                          <div class="col-12"><label class="form-label">BigData 访问令牌</label><input name="bigdata_api_token" class="form-control" value="{{ g.bigdata_api_token }}" /></div>
+                        </div>
+                      </div>
+
+                      <div class="d-flex gap-2">
+                        <button class="btn btn-primary btn-sm" type="submit">保存分组</button>
+                      </div>
+                    </form>
+
+                    <form method="post" action="/proxy-groups/{{ g.id }}/delete" class="d-inline-block mt-2" onsubmit="return confirm('确认删除该代理组？')">
+                      <button class="btn btn-outline-danger btn-sm" type="submit">删除分组</button>
+                    </form>
+                  </details>
+                </div>
+              {% else %}
+                <div class="text-secondary">当前还没有代理组。</div>
+              {% endfor %}
+            </div>
+          </section>
+
+          <section id="panel-groups" class="panel-card fade-in" style="display:none;">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <div>
+                <div class="fw-semibold">分组管理</div>
+                <div class="small text-secondary">按分组统一管理域名命中与拨号设置入口</div>
+              </div>
+            </div>
+
+            <div class="p-3">
+              {% for g in settings.proxy_groups %}
+                <div class="proxy-group-card">
+                  <div class="d-flex flex-wrap gap-2 align-items-start justify-content-between mb-2">
+                    <div>
+                      <div class="fw-semibold">{{ g.name }}</div>
+                      <div class="text-secondary small">分组编号 {{ g.id }}</div>
+                    </div>
+                    <span class="mode-badge"><i class="bi bi-router"></i>{{ proxy_mode_map.get(g.proxy_mode, g.proxy_mode) }}</span>
+                  </div>
+                  <div class="mb-2 text-secondary small d-flex gap-2 flex-wrap">
+                    <span class="code">已绑定规则 {{ group_rule_counts.get(g.id, 0) }} 条</span>
+                    <span class="code">协议 {{ protocol_map.get(g.proxy_protocol, g.proxy_protocol) }}</span>
+                    <span class="code">轮换 {{ "开启" if g.proxy_round_robin else "关闭" }}</span>
+                  </div>
+                  <div class="d-flex gap-2 flex-wrap">
+                    <a class="btn btn-sm btn-outline-light" href="/?tab=domains&rule_group={{ g.id }}">查看该组域名</a>
+                    <a class="btn btn-sm btn-primary" href="/?tab=proxies&focus_group={{ g.id }}">管理拨号设置</a>
+                  </div>
+                </div>
+              {% else %}
+                <div class="text-secondary">暂无分组。</div>
+              {% endfor %}
+            </div>
+          </section>
+
+          <section id="panel-system" class="panel-card fade-in" style="display:none;">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <div>
+                <div class="fw-semibold">系统设置</div>
+                <div class="small text-secondary">监听端口、默认分组、白名单和用户</div>
+              </div>
+            </div>
+
+            <div class="p-3">
+              <form class="row g-3" method="post" action="/system">
+                <div class="col-md-4">
+                  <label class="form-label">代理监听地址</label>
+                  <input name="listen_host" class="form-control" value="{{ settings.listen_host }}" />
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label">代理监听端口</label>
+                  <input name="listen_port" class="form-control" value="{{ settings.listen_port }}" />
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Web 监听地址</label>
+                  <input name="web_host" class="form-control" value="{{ settings.web_host }}" />
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label">Web 端口</label>
+                  <input name="web_port" class="form-control" value="{{ settings.web_port }}" />
+                </div>
+                <div class="col-md-8">
+                  <label class="form-label">默认代理组（未命中时默认处理）</label>
+                  <select name="default_proxy_group_id" class="form-select">
+                    {% for g in settings.proxy_groups %}
+                      <option value="{{ g.id }}" {% if settings.default_proxy_group_id == g.id %}selected{% endif %}>{{ g.name }}（{{ g.id }}）</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-12">
+                  <label class="form-label">Web IP 白名单（空表示允许全部）</label>
+                  <input name="allowed_client_ips" class="form-control" value="{{ settings.allowed_client_ips }}" />
+                </div>
+                <div class="col-12">
+                  <button class="btn btn-primary" type="submit">保存系统设置</button>
+                </div>
+              </form>
+
+              <div class="mt-4 soft-panel">
+                <div class="fw-semibold mb-2">用户管理</div>
+                  <div class="table-responsive table-wrap">
+                    <table class="table table-sm align-middle">
+                      <thead>
+                        <tr>
+                        <th style="width: 90px;">编号</th>
+                        <th>用户名</th>
+                        <th>创建时间</th>
+                        <th style="width: 240px;">重置密码</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for u in users %}
+                        <tr>
+                          <td>{{ u.id }}</td>
+                          <td>{{ u.username }}</td>
+                          <td>{{ u.created_at }}</td>
+                          <td>
+                            <form method="post" action="/users/{{ u.id }}/password" class="d-flex gap-2">
+                              <input name="new_password" class="form-control form-control-sm" placeholder="新密码" />
+                              <button class="btn btn-sm btn-outline-light" type="submit">改密</button>
+                            </form>
+                          </td>
+                        </tr>
+                      {% else %}
+                        <tr>
+                          <td colspan="4" class="text-secondary">暂无用户。</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+                <form class="row g-3 align-items-end mt-3" method="post" action="/users">
+                  <div class="col-md-4"><input name="username" class="form-control" placeholder="用户名" required /></div>
+                  <div class="col-md-4"><input name="password" type="password" class="form-control" placeholder="初始密码" required /></div>
+                  <div class="col-md-2"><button class="btn btn-primary w-100" type="submit">新增用户</button></div>
+                </form>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.__DPM_ACTIVE_TAB__ = "{{ active_tab or 'domains' }}";
+    window.__DPM_ACTIVE_GROUP_FILTER__ = "{{ active_rule_group or 0 }}";
+    window.__DPM_FOCUS_GROUP__ = "{{ focus_proxy_group or 0 }}";
+  </script>
+  <script src="{{ request.url_for('static', path='dashboard.js') }}" defer></script>
+  <script
+    src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+    crossorigin="anonymous"
+  ></script>
+</body>
+</html>
