@@ -295,6 +295,74 @@ function Start-ServiceInTerminal {
   throw "No terminal executable found, cannot start service window"
 }
 
+function Ensure-WebPortFree {
+  param([int]$Port)
+  $getPids = {
+    $pids = @()
+
+    try {
+      $listeners = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop
+      $pids = $listeners | ForEach-Object { $_.OwningProcess } | Where-Object { $_ -ne $null } | Sort-Object -Unique
+    } catch {
+      $pattern = "TCP\s+\S+:$Port\s+\S+\s+LISTENING\s+(\d+)"
+      $netstat = netstat -ano -p tcp 2>$null | Select-String -Pattern $pattern
+      if ($netstat -and $netstat.Matches) {
+        foreach ($match in $netstat.Matches) {
+          if ($match.Groups.Count -gt 1) {
+            $candidate = $match.Groups[1].Value.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+              $pids += [int]$candidate
+            }
+          }
+        }
+        $pids = $pids | Sort-Object -Unique
+      }
+    }
+
+    return $pids
+  }
+
+  $pids = & $getPids
+  if (-not $pids -or $pids.Count -eq 0) {
+    Write-DeployLog "端口 ${Port} 当前空闲"
+    return
+  }
+
+  Write-DeployLog "检测到端口 ${Port} 被占用，准备强制终止对应进程: $($pids -join ',')"
+  foreach ($pid in $pids) {
+    try {
+      $proc = Get-Process -Id $pid -ErrorAction Stop
+      if ($null -ne $proc) {
+        Write-DeployLog "强制停止: $($proc.ProcessName) (PID=$pid)"
+        try {
+          Stop-Process -Id $pid -Force -ErrorAction Stop
+        } catch {
+          & taskkill.exe /F /PID $pid 2>$null | Out-Null
+        }
+      }
+    } catch {
+      # ignore if process already gone
+    }
+  }
+
+  $retries = 6
+  for ($i = 0; $i -lt $retries; $i++) {
+    Start-Sleep -Seconds 1
+    $remaining = & $getPids
+    if (-not $remaining -or $remaining.Count -eq 0) {
+      Write-DeployLog "端口 ${Port} 已释放"
+      return
+    }
+  }
+
+  throw "端口 ${Port} 仍被占用（PIDs: $($pids -join ',')），请先释放端口后再启动。"
+}
+
+function Get-WebLoginUrl {
+  param([string]$HostHint, [int]$Port)
+  return "http://${HostHint}:$Port/login"
+}
+
 function Wait-ForServiceReady {
   param(
     [string]$HostHint,
@@ -325,7 +393,7 @@ function Open-WebPanel {
     [string]$AdminPassword
   )
 
-  $webUrl = "http://{0}:{1}/login" -f $HostHint, $Port
+  $webUrl = Get-WebLoginUrl -HostHint $HostHint -Port $Port
   Write-DeployLog ("Web URL: {0}" -f $webUrl)
   Write-DeployLog ("Default login: {0} / {1}" -f $AdminUser, $AdminPassword)
 
@@ -834,11 +902,14 @@ if ($DeployMode -eq "interactive") {
   $startNow = "Y"
 }
 
+$webPort = Parse-IntValue -Value ([string]$webPort) -Default 6666 -Min 1 -Max 65535
+
 if ($startNow -match '^[Nn]$') {
   Write-DeployLog "Skip auto-start. Manual command: .venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port $webPort"
 } else {
   $publicIp = Get-PublicIp
   $webHostHint = Get-PanelHostHint -PublicIp $publicIp
+  Ensure-WebPortFree -Port ([int]$webPort)
   $proc = Start-ServiceInTerminal -PythonBinary $VenvPython -WebPort $webPort
   Write-DeployLog "Service terminal started, PID=$($proc.Id)"
 
@@ -846,7 +917,7 @@ if ($startNow -match '^[Nn]$') {
     Open-WebPanel -HostHint $webHostHint -Port $webPort -AdminUser $adminUser -AdminPassword $adminPassword
   } else {
     Write-DeployLog "Health check timeout (about 20s), please verify the service status manually."
-    Write-DeployLog "Suggested URL: http://{0}:{1}/login" -f $webHostHint, $webPort
+    Write-DeployLog "Suggested URL: $(Get-WebLoginUrl -HostHint $webHostHint -Port $webPort)"
   }
 }
 
@@ -854,6 +925,6 @@ Write-DeployLog "Deployment completed"
 if ($startNow -match '^[Nn]$') {
   $publicIp = Get-PublicIp
   $webHostHint = Get-PanelHostHint -PublicIp $publicIp
-  Write-DeployLog ("Web URL: http://{0}:{1}/login" -f $webHostHint, $webPort)
+  Write-DeployLog "Web URL: $(Get-WebLoginUrl -HostHint $webHostHint -Port $webPort)"
   Write-DeployLog ("Default login: {0} / {1}" -f $adminUser, $adminPassword)
 }

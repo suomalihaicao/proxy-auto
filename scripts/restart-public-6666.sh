@@ -8,6 +8,7 @@ LOG_FILE="/tmp/domain-proxy-manager.log"
 SERVICE_NAME="domain-proxy-manager"
 PID_FILE="/tmp/domain-proxy-manager-6666.pid"
 DB_PATH="$DATA_DIR/app.db"
+WEB_PORT="6666"
 DEFAULT_ADMIN_USER="${PROXY_ADMIN_USER:-admin}"
 DEFAULT_ADMIN_PASSWORD="${PROXY_ADMIN_PASSWORD:-admin123}"
 
@@ -59,6 +60,60 @@ wait_for_health() {
   return 1
 }
 
+collect_listening_pids() {
+  local port="$1"
+  local pids=""
+
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -tiTCP -sTCP:LISTEN -P -n -i ":$port" 2>/dev/null || true)"
+  elif command -v ss >/dev/null 2>&1; then
+    pids="$(ss -ltnp "sport = :$port" 2>/dev/null | awk 'NR>1 { if (match($0, /pid=([0-9]+)/, a)) print a[1] }' | sort -u || true)"
+  elif command -v fuser >/dev/null 2>&1; then
+    pids="$(fuser -n tcp "$port" 2>/dev/null || true)"
+  fi
+
+  echo "$pids"
+}
+
+release_web_port() {
+  local port="$1"
+  local pids
+  local attempts=6
+  local i=0
+
+  pids="$(collect_listening_pids "$port")"
+  if [[ -z "${pids//[[:space:]]/}" ]]; then
+    echo "端口 ${port} 当前空闲"
+    return 0
+  fi
+
+  echo "检测到端口 ${port} 被占用，强制停止进程: $pids"
+  for pid in $pids; do
+    if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+      kill -15 "$pid" 2>/dev/null || true
+    fi
+  done
+
+  while (( i < attempts )); do
+    sleep 1
+    pids="$(collect_listening_pids "$port")"
+    if [[ -z "${pids//[[:space:]]/}" ]]; then
+      echo "端口 ${port} 已释放"
+      return 0
+    fi
+
+    for pid in $pids; do
+      if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+        kill -9 "$pid" 2>/dev/null || true
+      fi
+    done
+    ((i++))
+  done
+
+  echo "端口 ${port} 释放失败: $pids"
+  return 1
+}
+
 cleanup_old_instances() {
   local pattern="$1"
   local pids
@@ -93,6 +148,7 @@ if [[ ! -x "$BASE_DIR/.venv/bin/python" ]]; then
   exit 1
 fi
 
+release_web_port "$WEB_PORT"
 ensure_default_admin "$BASE_DIR/.venv/bin/python" "$DB_PATH" "$DEFAULT_ADMIN_USER" "$DEFAULT_ADMIN_PASSWORD"
 
 if [[ -f "$SETTINGS_FILE" ]]; then
@@ -184,9 +240,9 @@ else
   echo "已启动临时前台进程 (pid: $pid)"
 
   echo "监听检查:"
-  if wait_for_health "127.0.0.1" 6666; then
+  if wait_for_health "127.0.0.1" "$WEB_PORT"; then
     if command -v ss >/dev/null 2>&1; then
-      ss -lntp | grep -E '(:6666|:3128)' || true
+      ss -lntp | grep -E "(:${WEB_PORT}|:3128)" || true
     else
       echo "  未检测到 ss 工具，已跳过监听列表输出"
     fi
@@ -197,13 +253,13 @@ else
       echo "最新日志："
       tail -n 60 "$LOG_FILE" 2>/dev/null || true
     else
-      echo "启动失败: 6666 健康检查超时且进程退出"
+      echo "启动失败: ${WEB_PORT} 健康检查超时且进程退出"
       echo "日志尾部："
       tail -n 80 "$LOG_FILE" 2>/dev/null || true
       echo
       echo "排查建议："
       echo "1. 检查服务进程是否在运行：ps -ef | grep uvicorn"
-      echo "2. 手动前台启动看直接报错：cd $BASE_DIR && ./.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 6666"
+      echo "2. 手动前台启动看直接报错：cd $BASE_DIR && ./.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port ${WEB_PORT}"
       exit 1
     fi
   fi
