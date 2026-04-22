@@ -1,5 +1,7 @@
 # Domain Proxy Manager
 
+版本：v1.0.0
+
 一个带登录的轻量代理网关管理器，用于在 Linux/Windows 上统一处理“部分域名走上游代理、其他域名直连”的场景。
 
 项目名：proxy-auto  
@@ -27,6 +29,52 @@ cd /root/domain-proxy-manager
 chmod +x scripts/install.sh
 ./scripts/install.sh
 ```
+
+## 一键部署
+
+Linux 下直接运行：
+
+```bash
+cd /root/domain-proxy-manager
+chmod +x scripts/deploy-linux.sh
+./scripts/deploy-linux.sh
+```
+
+Windows 下运行（PowerShell）：
+
+```powershell
+Set-Location C:\path\to\domain-proxy-manager
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+./scripts/deploy-windows.ps1
+```
+
+部署脚本会自动完成：
+
+- 检测内网 IP 与公网 IP
+- 自动创建/复用项目内 `.venv`
+- 测速 `阿里源` 与 `官方源` 并自动选择更快源
+- 安装 `requirements.txt` 依赖到项目目录（`./env_tools/pip-cache` 缓存）
+- 生成 `data/settings.json`
+- 初始化数据库并创建默认管理员（默认 `admin` / `admin123`，可修改）
+- 可选启动 `8080` 管理页面和 `3128` 代理端口
+
+如果你想把这个流程用于自动化部署，也可以后续把脚本参数化（目前是交互式向导）。
+
+## 环境自动安装说明
+
+- Linux 脚本会自动校验最小环境：
+  - Bash
+  - Python `3.10+`（含 `venv`）
+  - `curl` 或 `wget`
+  - `git`（可选）
+- Windows 脚本会自动校验最小环境：
+  - PowerShell `5+`
+  - Python `3.10+`
+  - 可访问 `Invoke-WebRequest` / `Invoke-RestMethod`
+- 项目环境目录为 `./env_tools`。  
+  - Linux: 会优先放置本项目专用 Python 与下载产物，并把 pip 缓存放到 `./env_tools/pip-cache`。  
+  - Windows: 下载器和 pip 缓存也会落在 `.\env_tools` 下；脚本会先尝试 `winget`/`choco`，再尝试将 Python 安装到 `.\env_tools\python`。
+- 当满足条件时自动跳过安装；不满足时尽可能自动安装后继续部署；若包管理器不可用或下载受限，会给出明确报错并提示手动处理。
 安装可选步骤里有“放行端口”，用于云服务器外网无法访问 8080/3128 时自动尝试放行。
 
 ## 访问

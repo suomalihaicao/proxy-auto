@@ -5,3 +5,4 @@ __pycache__/
 *.log
 *.pid
 .DS_Store
+env_tools/
