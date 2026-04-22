@@ -10,7 +10,7 @@ class ProxySettings:
     listen_host: str = "0.0.0.0"
     listen_port: int = 3128
     web_host: str = "0.0.0.0"
-    web_port: int = 6666
+    web_port: int = 8666
     proxy_mode: str = "single_ip"
     proxy_protocol: str = "http"
     proxy_host: str = ""

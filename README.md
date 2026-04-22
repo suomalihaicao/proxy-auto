@@ -48,7 +48,7 @@ Set-Location C:\path\to\domain-proxy-manager
 
 在 Git Bash 下直接运行 `./setup.sh`，会自动识别到 Windows 环境并调用 PowerShell 部署脚本；如需强制 Linux 路径，可加 `--linux`。
 
-`setup.sh` 是**首次部署入口**，会完成初始化与默认配置兜底，并在结束时直接启动服务（启动口默认 6666）。  
+`setup.sh` 是**首次部署入口**，会完成初始化与默认配置兜底，并在结束时直接启动服务（启动口默认 8666）。  
 `run.sh` 负责启动服务，部署完成后可直接单独执行 `./run.sh` 复用启动逻辑。
 
 ## 一键部署
@@ -109,7 +109,7 @@ Windows 安装脚本会自动：
 - 测速 `阿里源` 与 `官方源` 并自动选择更快源
 - 安装 `requirements.txt` 依赖到项目目录（`./env_tools/pip-cache` 缓存）
 - 初始化数据库并确保默认管理员（默认 `admin` / `admin123`，可修改）
-- 启动服务（`6666` 管理、`3128` 代理）
+- 启动服务（`8666` 管理、`3128` 代理）
 
 如需可复现的自动化部署场景，请配合 `--start-only` 或 `--interactive` 做参数化。
 
@@ -128,7 +128,7 @@ Windows 安装脚本会自动：
   - Linux: 会优先放置本项目专用 Python 与下载产物，并把 pip 缓存放到 `./env_tools/pip-cache`。  
   - Windows: 下载器和 pip 缓存也会落在 `.\env_tools` 下；脚本会先尝试 `winget`/`choco`，再尝试将 Python 安装到 `.\env_tools\python`。
 - 当满足条件时自动跳过安装；不满足时尽可能自动安装后继续部署；若包管理器不可用或下载受限，会给出明确报错并提示手动处理。
-安装可选步骤里有“放行端口”，用于云服务器外网无法访问 6666/3128 时自动尝试放行。
+安装可选步骤里有“放行端口”，用于云服务器外网无法访问 8666/3128 时自动尝试放行。
 
 ## 访问
 
@@ -184,7 +184,7 @@ Windows 安装脚本会自动：
 ./run.sh
 ```
 
-`run.sh` 会读取 `data/settings.json` 的 host/port（缺省为 `0.0.0.0:6666`），不改配置仅用于启动。
+`run.sh` 会读取 `data/settings.json` 的 host/port（缺省为 `0.0.0.0:8666`），不改配置仅用于启动。
 
 ```bash
 python3 -m venv .venv

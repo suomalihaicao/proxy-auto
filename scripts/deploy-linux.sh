@@ -642,8 +642,8 @@ if [[ "$DEPLOY_MODE" == "interactive" ]]; then
   listen_host="${listen_host:-0.0.0.0}"
   read -r -p "代理监听端口 [3128]: " listen_port
   listen_port="${listen_port:-3128}"
-  read -r -p "Web 监听端口 [6666]: " web_port
-  web_port="${web_port:-6666}"
+  read -r -p "Web 监听端口 [8666]: " web_port
+  web_port="${web_port:-8666}"
 
   read -r -p "管理员用户名 [admin]: " admin_user
   admin_user="${admin_user:-admin}"

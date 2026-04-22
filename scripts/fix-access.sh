@@ -9,7 +9,7 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
 fi
 
 web_host="0.0.0.0"
-web_port="6666"
+web_port="8666"
 proxy_port="3128"
 
 if [[ -f "$SETTINGS_FILE" ]]; then
@@ -22,12 +22,12 @@ try:
 except Exception:
     cfg = {}
 print(cfg.get("web_host", "0.0.0.0"))
-print(cfg.get("web_port", 6666))
+print(cfg.get("web_port", 8666))
 print(cfg.get("listen_port", 3128))
 PY
   )
   web_host="${vals[0]:-0.0.0.0}"
-  web_port="${vals[1]:-6666}"
+  web_port="${vals[1]:-8666}"
   proxy_port="${vals[2]:-3128}"
 fi
 

@@ -112,8 +112,8 @@ listen_host="${listen_host:-0.0.0.0}"
 read -r -p "代理监听端口 [3128]: " listen_port
 listen_port="${listen_port:-3128}"
 
-read -r -p "Web 监听端口 [6666]: " web_port
-web_port="${web_port:-6666}"
+read -r -p "Web 监听端口 [8666]: " web_port
+web_port="${web_port:-8666}"
 
   read -r -p "管理员用户名 [admin]: " admin_user
   admin_user="${admin_user:-admin}"
@@ -214,7 +214,7 @@ fi
 export PYTHONPATH="$BASE_DIR:${PYTHONPATH:-}"
 
 web_host="0.0.0.0"
-web_port="6666"
+web_port="8666"
 
 if [[ -f "$BASE_DIR/data/settings.json" ]]; then
   readarray -t settings_lines < <("$PY" - <<PY
@@ -227,7 +227,7 @@ try:
 except Exception:
     cfg = {}
 print(cfg.get("web_host", "0.0.0.0"))
-print(cfg.get("web_port", 6666))
+print(cfg.get("web_port", 8666))
 PY
   )
   if [[ -n "${settings_lines[0]:-}" ]]; then
@@ -253,21 +253,21 @@ EOF
   chmod +x "$BASE_DIR/run.sh"
 fi
 
-read -r -p "是否尝试放行 Web 与代理端口（6666/3128）？[y/N]: " open_ports
+read -r -p "是否尝试放行 Web 与代理端口（8666/3128）？[y/N]: " open_ports
 if [[ "$open_ports" =~ ^[Yy]$ ]]; then
   if command -v ufw >/dev/null 2>&1; then
-    sudo ufw allow 6666/tcp || true
+    sudo ufw allow 8666/tcp || true
     sudo ufw allow 3128/tcp || true
-    echo "已尝试通过 ufw 放行 6666/tcp 与 3128/tcp"
+    echo "已尝试通过 ufw 放行 8666/tcp 与 3128/tcp"
   elif command -v firewall-cmd >/dev/null 2>&1; then
-    sudo firewall-cmd --zone=public --add-port=6666/tcp --permanent || true
+    sudo firewall-cmd --zone=public --add-port=8666/tcp --permanent || true
     sudo firewall-cmd --zone=public --add-port=3128/tcp --permanent || true
     sudo firewall-cmd --reload || true
-    echo "已尝试通过 firewalld 放行 6666/tcp 与 3128/tcp"
+    echo "已尝试通过 firewalld 放行 8666/tcp 与 3128/tcp"
   elif command -v iptables >/dev/null 2>&1; then
-    sudo iptables -C INPUT -p tcp --dport 6666 -j ACCEPT || sudo iptables -I INPUT -p tcp --dport 6666 -j ACCEPT
+    sudo iptables -C INPUT -p tcp --dport 8666 -j ACCEPT || sudo iptables -I INPUT -p tcp --dport 8666 -j ACCEPT
     sudo iptables -C INPUT -p tcp --dport 3128 -j ACCEPT || sudo iptables -I INPUT -p tcp --dport 3128 -j ACCEPT
-    echo "已尝试通过 iptables 放行 6666/tcp 与 3128/tcp"
+    echo "已尝试通过 iptables 放行 8666/tcp 与 3128/tcp"
   else
     echo "未检测到 ufw/firewalld/iptables，跳过端口放行"
   fi
