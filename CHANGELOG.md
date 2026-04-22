@@ -15,6 +15,21 @@ All notable changes to this project will be documented in this file.
 - `setup.sh` 默认行为修复为始终注入 `--start-only`，避免因参数透传异常导致进入交互式代理模式选择。
 - `setup.sh` 会通过 `PROXY_AUTO_NON_INTERACTIVE` 强制传递给部署脚本，防止从 Git Bash 间接调用时误进入交互式参数页。
 
+## [1.1.0] - 2026-04-22
+
+### Added
+- 使用 Dash 重构 Web 管理端，域名配置、分组管理、系统设置全部改为单页操作。
+- 新增左侧分组导航 + 右侧内容区的组织架构式交互布局。
+- 代理设置面板增加统一编辑、批量移动、快速新增样式（仍保持分组与模式可配置）。
+
+### Changed
+- 登录成功后的默认工作入口统一为 `/ui/`（Dash），移除旧模板 Dashboard 页面作为主界面。
+- `app/main.py` 将 Dash 面板作为主要前端挂载点，前端文本逐步本地化为中文展示。
+
+### Fixed
+- 去除前端入口混用模板路由导致的访问路径歧义。
+- 确保新 UI 样式资源通过 `app/assets/dash.css` 独立加载，统一视觉体验。
+
 ## [1.0.3] - 2026-04-22
 
 ### Added

@@ -12,9 +12,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
-from itsdangerous import BadSignature, URLSafeTimedSerializer
+from starlette.middleware.wsgi import WSGIMiddleware
 
 from .config import ProxySettings, load_settings, save_settings
+from .dash_app import create_dash_app
+from .auth import COOKIE_NAME, parse_user, sign_user
 from .db import (
     add_proxy_group,
     add_rule,
@@ -115,6 +117,7 @@ app = FastAPI(lifespan=lifespan)
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.mount("/ui", WSGIMiddleware(create_dash_app().server), name="ui")
 
 
 def _load_secret() -> str:
@@ -125,29 +128,11 @@ def _load_secret() -> str:
 app.add_middleware(SessionMiddleware, secret_key=_load_secret())
 
 
-def _session_secret() -> str:
-    return load_settings(SETTINGS_PATH).session_secret
-
-
-def _serialize_user(username: str) -> str:
-    s = URLSafeTimedSerializer(_session_secret(), salt="pm-auth")
-    return s.dumps({"u": username})
-
-
-def _deserialize_user(token: str) -> str:
-    s = URLSafeTimedSerializer(_session_secret(), salt="pm-auth")
-    data = s.loads(token, max_age=3600 * 24)
-    return str(data.get("u", ""))
-
-
 def current_user(request: Request) -> str:
-    token = request.cookies.get("auth")
+    token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
-    try:
-        username = _deserialize_user(token)
-    except (BadSignature, Exception):
-        raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
+    username = parse_user(token)
     if not username:
         raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
     return username
@@ -479,8 +464,8 @@ async def do_login(
             {"error": "用户名或密码错误"},
             status_code=401,
         )
-    response = RedirectResponse(url="/", status_code=303)
-    response.set_cookie("auth", _serialize_user(username), httponly=True)
+    response = RedirectResponse(url="/ui/", status_code=303)
+    response.set_cookie(COOKIE_NAME, sign_user(username), httponly=True)
     return response
 
 
@@ -494,38 +479,8 @@ async def logout(_: None = Depends(_require_web_access)):
 @app.get("/", response_class=HTMLResponse)
 async def index(
     request: Request,
-    tab: str | None = None,
-    _: None = Depends(_require_web_access),
-    username: str = Depends(current_user),
 ):
-    rules = list_rules(DB_PATH)
-    proxy_groups = list_proxy_groups(DB_PATH)
-    users = list_users(DB_PATH)
-    settings = _settings_for_render(load_settings(SETTINGS_PATH), proxy_groups)
-    active_tab = tab or request.query_params.get("tab") or "domains"
-    active_rule_group = _parse_optional_group_id(
-        request.query_params.get("rule_group"), proxy_groups
-    )
-    focus_proxy_group = _parse_optional_group_id(
-        request.query_params.get("focus_group"), proxy_groups
-    )
-    group_rule_counts = _group_rule_counts(rules)
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        {
-            "user": username,
-            "rules": rules,
-            "proxy_groups": proxy_groups,
-            "users": users,
-            "settings": settings,
-            "active_tab": active_tab,
-            "query_error": request.query_params.get("error"),
-            "active_rule_group": active_rule_group,
-            "focus_proxy_group": focus_proxy_group,
-            "group_rule_counts": group_rule_counts,
-        },
-    )
+    return RedirectResponse(url="/ui/", status_code=303)
 
 
 @app.post("/rules", status_code=303)

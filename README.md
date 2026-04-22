@@ -1,15 +1,16 @@
 # Domain Proxy Manager
 
-版本：v1.0.3
+版本：v1.1.0
 
-一个带登录的轻量代理网关管理器，用于在 Linux/Windows 上统一处理“部分域名走上游代理、其他域名直连”的场景。
+一个带登录的轻量代理网关管理器，用于在 Linux/Windows 上统一处理“部分域名走上游代理、其他域名直连”的场景。  
+前端管理页面已重构为 Dash，统一入口为 `/ui`，不再渲染旧的模板管理页。
 
 项目名：proxy-auto  
 默认演示管理员账号：`admin` / `admin123`  
 
 ## 特性
 
-- Web 管理（FastAPI + 登录页 + Cookie 会话）
+- Web 管理（FastAPI + Dash + 登录页 + Cookie 会话）
 - 域名规则管理
   - `DOMAIN`（`exact`）
   - `DOMAIN-SUFFIX`（`suffix`）
@@ -128,7 +129,8 @@ Windows 安装脚本会自动：
 
 ## 访问
 
-- Web 地址: `http://<server_ip>:<web_port>/login`
+- 登录页: `http://<server_ip>:<web_port>/login`
+- 登录成功后访问 Dashboard: `http://<server_ip>:<web_port>/ui/`
 - 默认首次登录账号来自安装时填写的管理员账号
 
 ## 代理与规则
