@@ -295,39 +295,40 @@ function Start-ServiceInTerminal {
   throw "No terminal executable found, cannot start service window"
 }
 
+function Get-PidsByPort {
+  param([int]$PortToCheck)
+
+  $pids = @()
+
+  try {
+    $listeners = Get-NetTCPConnection -State Listen -LocalPort $PortToCheck -ErrorAction Stop
+    $pids = $listeners | ForEach-Object { $_.OwningProcess } | Where-Object { $_ -ne $null } | Sort-Object -Unique
+  } catch {
+    $pattern = "TCP\s+\S+:$PortToCheck\s+\S+\s+LISTENING\s+(\d+)"
+    $netstat = netstat -ano -p tcp 2>$null | Select-String -Pattern $pattern
+    if ($netstat -and $netstat.Matches) {
+      foreach ($match in $netstat.Matches) {
+        if ($match.Groups.Count -gt 1) {
+          $candidate = $match.Groups[1].Value.Trim()
+          if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            $pids += [int]$candidate
+          }
+        }
+      }
+      $pids = $pids | Sort-Object -Unique
+    }
+  }
+
+  return $pids
+}
+
 function Ensure-WebPortFree {
   param([int]$Port)
   if ($Port -le 0 -or $Port -gt 65535) {
     throw "无效端口: $Port"
   }
 
-  $getPids = {
-    param([int]$PortToCheck)
-    $pids = @()
-
-    try {
-      $listeners = Get-NetTCPConnection -State Listen -LocalPort $PortToCheck -ErrorAction Stop
-      $pids = $listeners | ForEach-Object { $_.OwningProcess } | Where-Object { $_ -ne $null } | Sort-Object -Unique
-    } catch {
-      $pattern = "TCP\s+\S+:$PortToCheck\s+\S+\s+LISTENING\s+(\d+)"
-      $netstat = netstat -ano -p tcp 2>$null | Select-String -Pattern $pattern
-      if ($netstat -and $netstat.Matches) {
-        foreach ($match in $netstat.Matches) {
-          if ($match.Groups.Count -gt 1) {
-            $candidate = $match.Groups[1].Value.Trim()
-            if (-not [string]::IsNullOrWhiteSpace($candidate)) {
-              $pids += [int]$candidate
-            }
-          }
-        }
-        $pids = $pids | Sort-Object -Unique
-      }
-    }
-
-    return $pids
-  }
-
-  $pids = & $getPids -PortToCheck $Port
+  $pids = Get-PidsByPort -PortToCheck $Port
   if (-not $pids -or $pids.Count -eq 0) {
     Write-DeployLog "端口 ${Port} 当前空闲"
     return
@@ -353,7 +354,7 @@ function Ensure-WebPortFree {
   $retries = 6
   for ($i = 0; $i -lt $retries; $i++) {
     Start-Sleep -Seconds 1
-    $remaining = & $getPids -PortToCheck $Port
+    $remaining = Get-PidsByPort -PortToCheck $Port
     if (-not $remaining -or $remaining.Count -eq 0) {
       Write-DeployLog "端口 ${Port} 已释放"
       return
