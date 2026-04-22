@@ -20,11 +20,11 @@ $PythonVersion = $null
 
 New-Item -ItemType Directory -Force -Path $DataDir, $EnvToolsDir, $EnvToolsBin, $PipCacheDir | Out-Null
 if ($PSVersionTable.PSVersion.Major -lt 5) {
-  throw "PowerShell 5.0+ 是最低要求。请使用 PowerShell 5.1 或更高版本。"
+  throw "PowerShell 5.0+ is required. Please use PowerShell 5.1 or higher."
 }
 
-Write-Host ("[deploy] Windows 最低环境: PowerShell {0}+ / Python {1}.{2}+ / Invoke-RestMethod + Invoke-WebRequest" -f 5, $MinimumPythonMajor, $MinimumPythonMinor)
-Write-Host ("[deploy] 项目工具目录: {0}（依赖缓存与安装器会放在该目录）" -f $EnvToolsDir)
+Write-Host ("[deploy] Windows minimum environment: PowerShell {0}+ / Python {1}.{2}+ / Invoke-RestMethod + Invoke-WebRequest" -f 5, $MinimumPythonMajor, $MinimumPythonMinor)
+Write-Host ("[deploy] Environment tools directory: {0} (dependency cache and installer files will be placed here)" -f $EnvToolsDir)
 
 function Write-DeployLog {
   param([string]$Message)
@@ -60,22 +60,22 @@ function Test-PythonVersion {
 
 function Install-PythonWithManager {
   if (Get-Command winget -ErrorAction SilentlyContinue) {
-    Write-DeployLog "尝试通过 winget 安装 Python..."
+    Write-DeployLog "Trying to install Python via winget..."
     try {
       & winget install --id Python.Python.3 --accept-package-agreements --accept-source-agreements --silent --disable-interactivity --force | Out-Null
       return $true
     } catch {
-      Write-DeployLog "winget 安装失败，尝试下一种方式"
+      Write-DeployLog "winget installation failed, try next method"
     }
   }
 
   if (Get-Command choco -ErrorAction SilentlyContinue) {
-    Write-DeployLog "尝试通过 chocolatey 安装 Python..."
+    Write-DeployLog "Trying to install Python via chocolatey..."
     try {
       & choco install -y python | Out-Null
       return $true
     } catch {
-      Write-DeployLog "choco 安装失败，尝试下一种方式"
+      Write-DeployLog "choco installation failed, try next method"
     }
   }
 
@@ -114,9 +114,9 @@ function Select-FastestPythonInstaller {
 
   $installerFile = "python-$InstallerVersion-$ArchitectureTag.exe"
   $candidates = @(
-    @{ Name = "Python 官方"; Url = "https://www.python.org/ftp/python/$InstallerVersion/$installerFile" },
-    @{ Name = "阿里源"; Url = "https://mirrors.aliyun.com/python/$InstallerVersion/$installerFile" },
-    @{ Name = "华为源"; Url = "https://mirrors.huaweicloud.com/python/$InstallerVersion/$installerFile" }
+    @{ Name = "Python official"; Url = "https://www.python.org/ftp/python/$InstallerVersion/$installerFile" },
+    @{ Name = "Aliyun mirror"; Url = "https://mirrors.aliyun.com/python/$InstallerVersion/$installerFile" },
+    @{ Name = "Huawei mirror"; Url = "https://mirrors.huaweicloud.com/python/$InstallerVersion/$installerFile" }
   )
 
   $best = [double]::PositiveInfinity
@@ -126,23 +126,23 @@ function Select-FastestPythonInstaller {
   foreach ($candidate in $candidates) {
     $latency = Get-PythonInstallerLatency -Url $candidate.Url
     if ($null -ne $latency) {
-      Write-DeployLog ("Python 安装包可用: {0} | 延迟={1}s" -f $candidate.Name, [math]::Round($latency, 3))
+      Write-DeployLog ("Python installer available: {0} | latency={1}s" -f $candidate.Name, [math]::Round($latency, 3))
       if ($latency -lt $best) {
         $best = $latency
         $selected = $candidate.Url
       }
       $hasAvailable = $true
     } else {
-      Write-DeployLog ("Python 安装包不可达: {0} ({1})" -f $candidate.Name, $candidate.Url)
+      Write-DeployLog ("Python installer unreachable: {0} ({1})" -f $candidate.Name, $candidate.Url)
     }
   }
 
   if (-not $hasAvailable) {
-    Write-DeployLog "Python 安装包源探测失败，回退官方源"
+    Write-DeployLog "Python installer probe failed, fallback to official source"
     return "https://www.python.org/ftp/python/$InstallerVersion/$installerFile"
   }
 
-  Write-DeployLog ("已选择最快 Python 安装源: {0}" -f $selected)
+  Write-DeployLog ("Selected fastest Python installer: {0}" -f $selected)
   return $selected
 }
 
@@ -160,11 +160,11 @@ function Install-PythonToEnvTools {
   $installerUrl = Select-FastestPythonInstaller -ArchitectureTag $archTag -InstallerVersion $installerVersion
   $installerPath = Join-Path $EnvToolsDir $installerFile
 
-  Write-DeployLog "尝试下载 Python 安装包到项目目录：$installerUrl"
+  Write-DeployLog "Trying to download Python installer to project dir: $installerUrl"
   try {
     Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing -MaximumRedirection 10 | Out-Null
   } catch {
-    Write-DeployLog "Python 安装包下载失败：$($_.Exception.Message)"
+    Write-DeployLog "Python installer download failed: $($_.Exception.Message)"
     return $false
   }
 
@@ -180,7 +180,7 @@ function Install-PythonToEnvTools {
     Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
     return (Test-Path $PythonExe)
   } catch {
-    Write-DeployLog "官方安装包执行失败：$($_.Exception.Message)"
+    Write-DeployLog "Python installer execution failed: $($_.Exception.Message)"
     return $false
   }
 }
@@ -188,7 +188,7 @@ function Install-PythonToEnvTools {
 function Ensure-PythonRuntime {
   $version = Get-LocalPythonVersion -Executable $PythonExe
   if (Test-PythonVersion -Ver $version) {
-    Write-DeployLog "使用项目目录 Python: $PythonExe"
+    Write-DeployLog "Using project Python: $PythonExe"
     $global:PythonVersion = $version
     return $PythonExe
   }
@@ -197,7 +197,7 @@ function Ensure-PythonRuntime {
     $launcherVer = Get-LocalPythonVersion -Executable "py" -BaseArgs @("-3")
     if (Test-PythonVersion -Ver $launcherVer) {
       $global:PythonVersion = $launcherVer
-      Write-DeployLog "使用 py launcher"
+      Write-DeployLog "Using py launcher"
       return "py|-3"
     }
   }
@@ -207,7 +207,7 @@ function Ensure-PythonRuntime {
     $version = Get-LocalPythonVersion -Executable $cmd
     if (Test-PythonVersion -Ver $version) {
       $global:PythonVersion = $version
-      Write-DeployLog "使用系统 python3: $cmd"
+      Write-DeployLog "Using system python3: $cmd"
       return $cmd
     }
   }
@@ -217,7 +217,7 @@ function Ensure-PythonRuntime {
     $version = Get-LocalPythonVersion -Executable $cmd
     if (Test-PythonVersion -Ver $version) {
       $global:PythonVersion = $version
-      Write-DeployLog "使用系统 python: $cmd"
+      Write-DeployLog "Using system python: $cmd"
       return $cmd
     }
   }
@@ -228,7 +228,7 @@ function Ensure-PythonRuntime {
       $version = Get-LocalPythonVersion -Executable $cmd
       if (Test-PythonVersion -Ver $version) {
         $global:PythonVersion = $version
-        Write-DeployLog "通过包管理器安装后使用系统 python3: $cmd"
+        Write-DeployLog "Use system python3 after package-manager install: $cmd"
         return $cmd
       }
     }
@@ -237,7 +237,7 @@ function Ensure-PythonRuntime {
       $version = Get-LocalPythonVersion -Executable $cmd
       if (Test-PythonVersion -Ver $version) {
         $global:PythonVersion = $version
-        Write-DeployLog "通过包管理器安装后使用系统 python: $cmd"
+        Write-DeployLog "Use system python after package-manager install: $cmd"
         return $cmd
       }
     }
@@ -247,7 +247,7 @@ function Ensure-PythonRuntime {
     $version = Get-LocalPythonVersion -Executable $PythonExe
     if (Test-PythonVersion -Ver $version) {
       $global:PythonVersion = $version
-      Write-DeployLog "已在项目目录安装 Python: $PythonExe"
+      Write-DeployLog "Installed Python in project directory: $PythonExe"
       return $PythonExe
     }
   }
@@ -261,7 +261,7 @@ function Get-LocalIps {
       Where-Object { $_.IPAddress -notlike "127.*" } |
       Select-Object -ExpandProperty IPAddress) -join ", "
   } catch {
-    "未检测到 IPv4"
+    "IPv4 not detected"
   }
 }
 
@@ -281,7 +281,7 @@ function Get-PublicIp {
       continue
     }
   }
-  "未检测到公网 IP"
+  "Public IP not detected"
 }
 
 function Get-PipMirrorLatency {
@@ -321,23 +321,23 @@ function Select-FastestPipSource {
   foreach ($mirror in $mirrors) {
     $latency = Get-PipMirrorLatency -Url $mirror
     if ($null -ne $latency) {
-      Write-DeployLog "镜像可用: $mirror | 延迟=$([math]::Round($latency,3))s"
+      Write-DeployLog "Mirror available: $mirror | latency=$([math]::Round($latency,3))s"
       if ($latency -lt $best) {
         $best = $latency
         $picked = $mirror
       }
       $hasAvailable = $true
     } else {
-      Write-DeployLog "镜像不可达: $mirror"
+      Write-DeployLog "Mirror unreachable: $mirror"
     }
   }
 
   if (-not $hasAvailable) {
-    Write-DeployLog "镜像探测失败，回退官方源 https://pypi.org/simple"
+    Write-DeployLog "Mirror probe failed, fallback to https://pypi.org/simple"
     return "https://pypi.org/simple"
   }
 
-  Write-DeployLog "已选择最快 pip 源: $picked"
+  Write-DeployLog "Selected fastest pip source: $picked"
   return $picked
 }
 
@@ -365,37 +365,37 @@ function Ensure-VenvPip {
     return
   }
 
-  Write-DeployLog "虚拟环境缺少 pip，尝试通过 ensurepip 修复..."
+  Write-DeployLog "Venv missing pip, trying ensurepip recovery..."
   try {
     & $VenvPython -m ensurepip --upgrade | Out-Null
     if (Test-Path -Path $VenvPip) {
       return
     }
   } catch {
-    Write-DeployLog "ensurepip 修复失败，继续尝试官方脚本..."
+    Write-DeployLog "ensurepip recovery failed, continue with get-pip.py..."
   }
 
   $getPipScript = Join-Path $EnvToolsDir "get-pip.py"
   try {
     Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPipScript -UseBasicParsing -MaximumRedirection 10 | Out-Null
   } catch {
-    throw "无法下载 get-pip.py，无法完成 pip 安装"
+    throw "Cannot download get-pip.py, pip install cannot proceed"
   }
 
   try {
     & $VenvPython $getPipScript --no-warn-script-location | Out-Null
   } catch {
-    throw "get-pip.py 执行失败，无法在虚拟环境中安装 pip"
+    throw "get-pip.py execution failed, unable to install pip in venv"
   }
 
   if (-not (Test-Path -Path $VenvPip)) {
-    throw "虚拟环境 pip 安装失败"
+    throw "Venv pip installation failed"
   }
 }
 
 $pythonInfo = Ensure-PythonRuntime
 if ([string]::IsNullOrWhiteSpace($pythonInfo)) {
-  throw "未检测到 Python3.10+，自动化安装未完成，请确认网络与权限后重试。"
+  throw "No suitable Python 3.10+, automation install not completed. Check network/permissions and retry."
 }
 
 if ($pythonInfo -eq "py|-3") {
@@ -405,26 +405,26 @@ if ($pythonInfo -eq "py|-3") {
   $pythonExe = $pythonInfo
   $pythonArgs = @()
 }
-Write-DeployLog ("使用 Python: {0} {1}" -f $pythonExe, ($pythonArgs -join " "))
+Write-DeployLog ("Using Python: {0} {1}" -f $pythonExe, ($pythonArgs -join " "))
 
 function Invoke-BootstrapPython {
   param([string[]]$Arguments)
   Invoke-Python -Executable $pythonExe -BaseArgs $pythonArgs -Arguments $Arguments
 }
 
-Write-DeployLog "开始部署（项目：$BaseDir）"
-Write-DeployLog "内网 IP: $(Get-LocalIps)"
-Write-DeployLog "公网 IP: $(Get-PublicIp)"
+Write-DeployLog "Start deployment (project: $BaseDir)"
+Write-DeployLog "Intranet IP: $(Get-LocalIps)"
+Write-DeployLog "Public IP: $(Get-PublicIp)"
 
 if (-not (Test-Path -Path $VenvDir)) {
-  Write-DeployLog "未检测到现有虚拟环境，正在创建 $VenvDir ..."
+  Write-DeployLog "No existing venv found, creating: $VenvDir ..."
   Invoke-BootstrapPython @("-m","venv",$VenvDir)
 } else {
   $existingVenvPython = Join-Path $VenvDir "Scripts\python.exe"
   try {
     & $existingVenvPython -V | Out-Null
   } catch {
-    Write-DeployLog "现有虚拟环境异常，准备重建 $VenvDir ..."
+    Write-DeployLog "Existing venv is broken, recreating: $VenvDir ..."
     Remove-Item -Path $VenvDir -Recurse -Force
     Invoke-BootstrapPython @("-m","venv",$VenvDir)
   }
@@ -439,11 +439,11 @@ if (-not (Test-Path $PipExe)) {
 $Env:PIP_CACHE_DIR = $PipCacheDir
 $PipIndex = Select-FastestPipSource
 
-Write-DeployLog "安装依赖到项目虚拟环境"
+Write-DeployLog "Installing dependencies into project venv"
 & $PipExe install --disable-pip-version-check --no-input --upgrade pip -i $PipIndex
 & $PipExe install --disable-pip-version-check --no-input -r (Join-Path $BaseDir "requirements.txt") -i $PipIndex --cache-dir $PipCacheDir
 
-$proxyMode = Read-Host "上游代理模式 [single_ip/api/bigdata_api/direct] (回车默认 single_ip)"
+$proxyMode = Read-Host "Upstream proxy mode [single_ip/api/bigdata_api/direct] (default single_ip)"
 if ([string]::IsNullOrWhiteSpace($proxyMode)) { $proxyMode = "single_ip" }
 $proxyMode = $proxyMode.Trim().ToLower()
 $protocol = "http"
@@ -463,48 +463,48 @@ switch ($proxyMode) {
   "bigdata_api" {}
   "direct" {}
   default {
-    throw "不支持的模式: $proxyMode"
+    throw "Unsupported proxy mode: $proxyMode"
   }
 }
 
 if ($proxyMode -eq "single_ip") {
-  $inputProtocol = Read-Host "单 IP 代理协议 [http/socks5] (回车默认 http)"
+  $inputProtocol = Read-Host "Single IP protocol [http/socks5] (default http)"
   if (-not [string]::IsNullOrWhiteSpace($inputProtocol)) {
     $protocol = $inputProtocol.ToLower()
   }
   if ($protocol -ne "http" -and $protocol -ne "socks5") {
-    throw "不支持的协议: $protocol"
+    throw "Unsupported protocol: $protocol"
   }
-  $proxyHost = Read-Host "单 IP 代理地址 (例如: 127.0.0.1)"
-  $proxyPort = Read-Host "单 IP 代理端口 (例如: 8080)"
-  $proxyUser = Read-Host "单 IP 账号（可空）"
-  $proxyPass = Read-Host "单 IP 密码（可空）"
+  $proxyHost = Read-Host "Single IP host (e.g. 127.0.0.1)"
+  $proxyPort = Read-Host "Single IP port (e.g. 8080)"
+  $proxyUser = Read-Host "Single IP username (optional)"
+  $proxyPass = Read-Host "Single IP password (optional)"
 }
 elseif ($proxyMode -eq "api") {
-  $apiUrl = Read-Host "API 地址（必填）"
+  $apiUrl = Read-Host "API URL (required)"
   if ([string]::IsNullOrWhiteSpace($apiUrl)) {
-    throw "API 模式需要填写 api_url"
+    throw "API mode requires api_url"
   }
 }
 elseif ($proxyMode -eq "bigdata_api") {
-  $bigdataApiUrl = Read-Host "BigData API 地址"
-  $apiUrl = Read-Host "API 地址（可空，作为 fallback）"
-  $bigdataApiToken = Read-Host "BigData Token（可空）"
+  $bigdataApiUrl = Read-Host "BigData API URL"
+  $apiUrl = Read-Host "API URL (optional, fallback)"
+  $bigdataApiToken = Read-Host "BigData token (optional)"
   if ([string]::IsNullOrWhiteSpace($bigdataApiUrl) -and [string]::IsNullOrWhiteSpace($apiUrl)) {
-    throw "BigData 模式需要至少填写一个 API 地址"
+    throw "BigData mode requires at least one API URL"
   }
 }
 
-$listenHost = Read-Host "代理监听地址 [0.0.0.0]"
+$listenHost = Read-Host "Listen host for proxy [0.0.0.0]"
 if ([string]::IsNullOrWhiteSpace($listenHost)) { $listenHost = "0.0.0.0" }
-$listenPort = Read-Host "代理监听端口 [3128]"
+$listenPort = Read-Host "Listen port for proxy [3128]"
 if ([string]::IsNullOrWhiteSpace($listenPort)) { $listenPort = "3128" }
-$webPort = Read-Host "Web 监听端口 [8080]"
+$webPort = Read-Host "Web listen port [8080]"
 if ([string]::IsNullOrWhiteSpace($webPort)) { $webPort = "8080" }
 
-$adminUser = Read-Host "管理员用户名 [admin]"
+$adminUser = Read-Host "Admin user [admin]"
 if ([string]::IsNullOrWhiteSpace($adminUser)) { $adminUser = "admin" }
-$adminPassword = Read-Host "管理员密码 [admin123]"
+$adminPassword = Read-Host "Admin password [admin123]"
 if ([string]::IsNullOrWhiteSpace($adminPassword)) { $adminPassword = "admin123" }
 
 if (Get-Command openssl -ErrorAction SilentlyContinue) {
@@ -544,7 +544,7 @@ $settings = [ordered]@{
 $settingsJson = $settings | ConvertTo-Json -Depth 2
 Set-Content -Path $SettingsPath -Value $settingsJson -Encoding UTF8
 
-Write-DeployLog "初始化数据库并创建管理员账号"
+Write-DeployLog "Initialize DB and ensure admin user"
 $env:DB_PATH = $DbPath
 $env:PROXY_ADMIN_USER = $adminUser
 $env:PROXY_ADMIN_PASSWORD = $adminPassword
@@ -559,14 +559,14 @@ admin_password = os.environ["PROXY_ADMIN_PASSWORD"]
 init_db(db_path)
 if get_user(db_path, admin_user) is None:
     create_user(db_path, admin_user, admin_password)
-    print(f"已创建管理员: {admin_user}")
+    print(f"Admin created: {admin_user}")
 else:
-    print(f"管理员已存在: {admin_user}")
+    print(f"Admin exists: {admin_user}")
 '@
 
-$startNow = Read-Host "部署完成后立即启动服务？[Y/n]"
+$startNow = Read-Host "Start service now? [Y/n]"
 if ($startNow -match '^[Nn]$') {
-  Write-DeployLog "已跳过启动，后续启动命令: .venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port $webPort"
+  Write-DeployLog "Skip auto-start. Manual command: .venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port $webPort"
 } else {
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $VenvPython
@@ -575,9 +575,9 @@ if ($startNow -match '^[Nn]$') {
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $false
   $proc = [System.Diagnostics.Process]::Start($psi)
-  Write-DeployLog "服务已启动，PID=$($proc.Id)"
+  Write-DeployLog "Service started, PID=$($proc.Id)"
 }
 
-Write-DeployLog "部署完成"
-Write-DeployLog ("Web 地址: http://{0}:{1}/login" -f (Get-PublicIp), $webPort)
-Write-DeployLog ("默认登录: {0} / {1}" -f $adminUser, $adminPassword)
+Write-DeployLog "Deployment completed"
+Write-DeployLog ("Web URL: http://{0}:{1}/login" -f (Get-PublicIp), $webPort)
+Write-DeployLog ("Default login: {0} / {1}" -f $adminUser, $adminPassword)

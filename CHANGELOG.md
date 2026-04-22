@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - 修复 `./setup.sh` 在 Windows Git Bash 场景下误调用 Linux 流程导致 `.venv/bin/python` 缺失并直接退出的问题。
+- 修复 `deploy-windows.ps1` 在部分 PowerShell 环境因 UTF-8 中文内容导致解析报错的问题（字符串改为兼容 ASCII，避免部署中断）。
 
 ## [1.0.1] - 2026-04-22
 
