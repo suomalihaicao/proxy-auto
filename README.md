@@ -1,6 +1,6 @@
 # Domain Proxy Manager
 
-版本：v1.0.2
+版本：v1.0.3
 
 一个带登录的轻量代理网关管理器，用于在 Linux/Windows 上统一处理“部分域名走上游代理、其他域名直连”的场景。
 
@@ -60,6 +60,19 @@ chmod +x scripts/deploy-linux.sh
 > 默认是非交互启动模式：拉起服务，不在脚本里设置代理参数。  
 > 代理模式、域名规则、监听端口等请在 Web 页面中配置。
 
+`setup.sh` 默认即为非交互（`start-only`）模式；Windows 下可直接执行：
+
+```powershell
+cd C:\path\to\domain-proxy-manager
+./setup.sh
+```
+
+如需手工输入配置（上游模式、监听端口、管理员等），执行：
+
+```powershell
+./setup.sh --interactive
+```
+
 如需一次性通过命令行重建 `settings` 与管理员，使用：
 
 ```bash
@@ -71,7 +84,13 @@ Windows 下运行（PowerShell）：
 ```powershell
 Set-Location C:\path\to\domain-proxy-manager
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-./scripts/deploy-windows.ps1
+./scripts/deploy-windows.ps1 --start-only
+```
+
+若你想交互式填写配置（包含上游模式与账号），执行：
+
+```powershell
+./scripts/deploy-windows.ps1 --interactive
 ```
 
 部署脚本会自动完成：

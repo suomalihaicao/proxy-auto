@@ -17,6 +17,7 @@ $PipCacheDir = Join-Path $EnvToolsDir "pip-cache"
 $MinimumPythonMajor = 3
 $MinimumPythonMinor = 10
 $PythonVersion = $null
+$DeployMode = "start_only"
 
 New-Item -ItemType Directory -Force -Path $DataDir, $EnvToolsDir, $EnvToolsBin, $PipCacheDir | Out-Null
 if ($PSVersionTable.PSVersion.Major -lt 5) {
@@ -29,6 +30,171 @@ Write-Host ("[deploy] Environment tools directory: {0} (dependency cache and ins
 function Write-DeployLog {
   param([string]$Message)
   Write-Host "[deploy] $Message"
+}
+
+function Show-Usage {
+  Write-Host "[deploy] 用法: .\deploy-windows.ps1 [--start-only|--interactive]"
+  Write-Host "[deploy]  --start-only     非交互模式（默认），仅拉起服务，参数/代理配置请去 Web 面板"
+  Write-Host "[deploy]  --interactive    交互式写入 settings 与管理员参数（可选）"
+}
+
+foreach ($arg in $args) {
+  switch ($arg) {
+    "--start-only" { $DeployMode = "start_only" ; continue }
+    "--start" { $DeployMode = "start_only" ; continue }
+    "--no-interactive" { $DeployMode = "start_only" ; continue }
+    "--interactive" { $DeployMode = "interactive"; continue }
+    "--help" { Show-Usage; exit 0 }
+    { $_ -like "-h" } { Show-Usage; exit 0 }
+    default {
+      Write-DeployLog ("Unsupported argument: {0}" -f $arg)
+      Show-Usage
+      exit 1
+    }
+  }
+}
+
+function Parse-IntValue {
+  param(
+    [string]$Value,
+    [int]$Default,
+    [int]$Min = [int]::MinValue,
+    [int]$Max = [int]::MaxValue
+  )
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return $Default
+  }
+  try {
+    $parsed = [int]$Value
+  } catch {
+    return $Default
+  }
+  if ($parsed -lt $Min) { return $Min }
+  if ($parsed -gt $Max) { return $Max }
+  return $parsed
+}
+
+function New-SessionSecret {
+  param([string]$PythonBinary)
+  if (Get-Command openssl -ErrorAction SilentlyContinue) {
+    try {
+      return (& openssl rand -hex 24).Trim()
+    } catch {
+      # fall through
+    }
+  }
+  return (& $PythonBinary -c "import secrets; print(secrets.token_hex(24))").Trim()
+}
+
+function Write-DeploymentSettings {
+  param(
+    [string]$ListenHost,
+    [string]$ListenPort,
+    [string]$WebPort,
+    [string]$ProxyMode,
+    [string]$ProxyProtocol,
+    [string]$ProxyHost,
+    [string]$ProxyPort,
+    [string]$ProxyUser,
+    [string]$ProxyPass,
+    [string]$ApiUrl,
+    [string]$BigdataApiUrl,
+    [string]$BigdataApiToken,
+    [string]$SessionSecret
+  )
+
+  $settings = [ordered]@{
+    listen_host = $ListenHost
+    listen_port = Parse-IntValue -Value $ListenPort -Default 3128 -Min 1 -Max 65535
+    web_host = "0.0.0.0"
+    web_port = Parse-IntValue -Value $WebPort -Default 8080 -Min 1 -Max 65535
+    proxy_mode = $ProxyMode
+    proxy_protocol = $ProxyProtocol
+    proxy_host = $ProxyHost
+    proxy_port = Parse-IntValue -Value $ProxyPort -Default 0 -Min 0 -Max 65535
+    proxy_username = $ProxyUser
+    proxy_password = $ProxyPass
+    api_url = $ApiUrl
+    api_method = "GET"
+    api_timeout = 8
+    api_cache_ttl = 20
+    api_headers = ""
+    api_body = ""
+    api_host_key = "host"
+    api_port_key = "port"
+    api_username_key = "username"
+    api_password_key = "password"
+    api_proxy_field = "proxy"
+    bigdata_api_url = $BigdataApiUrl
+    bigdata_api_token = $BigdataApiToken
+    allowed_client_ips = ""
+    session_secret = $SessionSecret
+  }
+
+  $settingsJson = $settings | ConvertTo-Json -Depth 2
+  Set-Content -Path $SettingsPath -Value $settingsJson -Encoding UTF8
+}
+
+function Ensure-DefaultSettings {
+  param([string]$PythonBinary)
+  if (Test-Path -Path $SettingsPath) {
+    return
+  }
+
+  Write-DeployLog "settings.json 不存在，创建默认配置（直接模式，Web/代理参数请到面板配置）"
+  Write-DeploymentSettings `
+    -ListenHost "0.0.0.0" `
+    -ListenPort "3128" `
+    -WebPort "8080" `
+    -ProxyMode "direct" `
+    -ProxyProtocol "http" `
+    -ProxyHost "" `
+    -ProxyPort "0" `
+    -ProxyUser "" `
+    -ProxyPass "" `
+    -ApiUrl "" `
+    -BigdataApiUrl "" `
+    -BigdataApiToken "" `
+    -SessionSecret (New-SessionSecret -PythonBinary $PythonBinary)
+}
+
+function Read-WebPortFromSettings {
+  param([string]$Fallback = "8080")
+  if (-not (Test-Path -Path $SettingsPath)) {
+    return Parse-IntValue -Value $Fallback -Default 8080 -Min 1 -Max 65535
+  }
+  try {
+    $cfg = Get-Content -Raw -Path $SettingsPath | ConvertFrom-Json
+    if ($null -ne $cfg.web_port) {
+      return Parse-IntValue -Value ([string]$cfg.web_port) -Default 8080 -Min 1 -Max 65535
+    }
+  } catch {
+    return Parse-IntValue -Value $Fallback -Default 8080 -Min 1 -Max 65535
+  }
+  return Parse-IntValue -Value $Fallback -Default 8080 -Min 1 -Max 65535
+}
+
+function Ensure-Admin {
+  param([string]$PythonBinary, [string]$AdminUser, [string]$AdminPassword)
+  Write-DeployLog "Initialize DB and ensure admin user"
+  $env:DB_PATH = $DbPath
+  $env:PROXY_ADMIN_USER = $AdminUser
+  $env:PROXY_ADMIN_PASSWORD = $AdminPassword
+  & $PythonBinary -c @'
+import os
+from app.db import init_db, get_user, create_user
+
+db_path = os.environ["DB_PATH"]
+admin_user = os.environ["PROXY_ADMIN_USER"]
+admin_password = os.environ["PROXY_ADMIN_PASSWORD"]
+
+init_db(db_path)
+if get_user(db_path, admin_user) is None:
+    create_user(db_path, admin_user, admin_password)
+    print(f"Admin created: {admin_user}")
+else:
+    print(f"Admin exists: {admin_user}")
+'@
 }
 
 function Get-LocalPythonVersion {
@@ -443,9 +609,7 @@ Write-DeployLog "Installing dependencies into project venv"
 & $PipExe install --disable-pip-version-check --no-input --upgrade pip -i $PipIndex
 & $PipExe install --disable-pip-version-check --no-input -r (Join-Path $BaseDir "requirements.txt") -i $PipIndex --cache-dir $PipCacheDir
 
-$proxyMode = Read-Host "Upstream proxy mode [single_ip/api/bigdata_api/direct] (default single_ip)"
-if ([string]::IsNullOrWhiteSpace($proxyMode)) { $proxyMode = "single_ip" }
-$proxyMode = $proxyMode.Trim().ToLower()
+$proxyMode = "direct"
 $protocol = "http"
 $proxyHost = ""
 $proxyPort = "0"
@@ -454,117 +618,82 @@ $proxyPass = ""
 $apiUrl = ""
 $bigdataApiUrl = ""
 $bigdataApiToken = ""
+$listenHost = "0.0.0.0"
+$listenPort = "3128"
+$webPort = Read-WebPortFromSettings -Fallback "8080"
+$adminUser = "admin"
+$adminPassword = "admin123"
+$sessionSecret = New-SessionSecret -PythonBinary $VenvPython
 
-switch ($proxyMode) {
-  "http" { $protocol = "http"; $proxyMode = "single_ip" }
-  "socks5" { $protocol = "socks5"; $proxyMode = "single_ip" }
-  "single_ip" {}
-  "api" {}
-  "bigdata_api" {}
-  "direct" {}
-  default {
-    throw "Unsupported proxy mode: $proxyMode"
+if ($DeployMode -eq "interactive") {
+  $inputMode = Read-Host "Upstream proxy mode [single_ip/api/bigdata_api/direct] (default single_ip)"
+  if ([string]::IsNullOrWhiteSpace($inputMode)) { $inputMode = "single_ip" }
+  $proxyMode = $inputMode.Trim().ToLower()
+  switch ($proxyMode) {
+    "http" { $protocol = "http"; $proxyMode = "single_ip" }
+    "socks5" { $protocol = "socks5"; $proxyMode = "single_ip" }
+    "single_ip" {}
+    "api" {}
+    "bigdata_api" {}
+    "direct" {}
+    default {
+      throw "Unsupported proxy mode: $proxyMode"
+    }
   }
-}
 
-if ($proxyMode -eq "single_ip") {
-  $inputProtocol = Read-Host "Single IP protocol [http/socks5] (default http)"
-  if (-not [string]::IsNullOrWhiteSpace($inputProtocol)) {
-    $protocol = $inputProtocol.ToLower()
+  if ($proxyMode -eq "single_ip") {
+    $inputProtocol = Read-Host "Single IP protocol [http/socks5] (default http)"
+    if (-not [string]::IsNullOrWhiteSpace($inputProtocol)) {
+      $protocol = $inputProtocol.ToLower()
+    }
+    if ($protocol -ne "http" -and $protocol -ne "socks5") {
+      throw "Unsupported protocol: $protocol"
+    }
+    $proxyHost = Read-Host "Single IP host (e.g. 127.0.0.1)"
+    $proxyPort = Read-Host "Single IP port (e.g. 8080)"
+    $proxyUser = Read-Host "Single IP username (optional)"
+    $proxyPass = Read-Host "Single IP password (optional)"
   }
-  if ($protocol -ne "http" -and $protocol -ne "socks5") {
-    throw "Unsupported protocol: $protocol"
+  elseif ($proxyMode -eq "api") {
+    $apiUrl = Read-Host "API URL (required)"
+    if ([string]::IsNullOrWhiteSpace($apiUrl)) {
+      throw "API mode requires api_url"
+    }
   }
-  $proxyHost = Read-Host "Single IP host (e.g. 127.0.0.1)"
-  $proxyPort = Read-Host "Single IP port (e.g. 8080)"
-  $proxyUser = Read-Host "Single IP username (optional)"
-  $proxyPass = Read-Host "Single IP password (optional)"
-}
-elseif ($proxyMode -eq "api") {
-  $apiUrl = Read-Host "API URL (required)"
-  if ([string]::IsNullOrWhiteSpace($apiUrl)) {
-    throw "API mode requires api_url"
+  elseif ($proxyMode -eq "bigdata_api") {
+    $bigdataApiUrl = Read-Host "BigData API URL"
+    $apiUrl = Read-Host "API URL (optional, fallback)"
+    $bigdataApiToken = Read-Host "BigData token (optional)"
+    if ([string]::IsNullOrWhiteSpace($bigdataApiUrl) -and [string]::IsNullOrWhiteSpace($apiUrl)) {
+      throw "BigData mode requires at least one API URL"
+    }
   }
-}
-elseif ($proxyMode -eq "bigdata_api") {
-  $bigdataApiUrl = Read-Host "BigData API URL"
-  $apiUrl = Read-Host "API URL (optional, fallback)"
-  $bigdataApiToken = Read-Host "BigData token (optional)"
-  if ([string]::IsNullOrWhiteSpace($bigdataApiUrl) -and [string]::IsNullOrWhiteSpace($apiUrl)) {
-    throw "BigData mode requires at least one API URL"
-  }
-}
 
-$listenHost = Read-Host "Listen host for proxy [0.0.0.0]"
-if ([string]::IsNullOrWhiteSpace($listenHost)) { $listenHost = "0.0.0.0" }
-$listenPort = Read-Host "Listen port for proxy [3128]"
-if ([string]::IsNullOrWhiteSpace($listenPort)) { $listenPort = "3128" }
-$webPort = Read-Host "Web listen port [8080]"
-if ([string]::IsNullOrWhiteSpace($webPort)) { $webPort = "8080" }
+  $listenHostInput = Read-Host "Listen host for proxy [0.0.0.0]"
+  if (-not [string]::IsNullOrWhiteSpace($listenHostInput)) { $listenHost = $listenHostInput.Trim() }
+  $listenPortInput = Read-Host "Listen port for proxy [3128]"
+  if (-not [string]::IsNullOrWhiteSpace($listenPortInput)) { $listenPort = $listenPortInput.Trim() }
+  $webPortInput = Read-Host "Web listen port [8080]"
+  if (-not [string]::IsNullOrWhiteSpace($webPortInput)) { $webPort = $webPortInput.Trim() }
 
-$adminUser = Read-Host "Admin user [admin]"
-if ([string]::IsNullOrWhiteSpace($adminUser)) { $adminUser = "admin" }
-$adminPassword = Read-Host "Admin password [admin123]"
-if ([string]::IsNullOrWhiteSpace($adminPassword)) { $adminPassword = "admin123" }
+  $adminUserInput = Read-Host "Admin user [admin]"
+  if (-not [string]::IsNullOrWhiteSpace($adminUserInput)) { $adminUser = $adminUserInput.Trim() }
+  $adminPasswordInput = Read-Host "Admin password [admin123]"
+  if (-not [string]::IsNullOrWhiteSpace($adminPasswordInput)) { $adminPassword = $adminPasswordInput }
 
-if (Get-Command openssl -ErrorAction SilentlyContinue) {
-  $sessionSecret = (& openssl rand -hex 24).Trim()
+  Write-DeploymentSettings -ListenHost $listenHost -ListenPort $listenPort -WebPort $webPort -ProxyMode $proxyMode -ProxyProtocol $protocol -ProxyHost $proxyHost -ProxyPort $proxyPort -ProxyUser $proxyUser -ProxyPass $proxyPass -ApiUrl $apiUrl -BigdataApiUrl $bigdataApiUrl -BigdataApiToken $bigdataApiToken -SessionSecret $sessionSecret
 } else {
-  $sessionSecret = (& $VenvPython -c "import secrets; print(secrets.token_hex(24))").Trim()
+  Ensure-DefaultSettings -PythonBinary $VenvPython
 }
 
-$settings = [ordered]@{
-  listen_host = $listenHost
-  listen_port = [int]$listenPort
-  web_host = "0.0.0.0"
-  web_port = [int]$webPort
-  proxy_mode = $proxyMode
-  proxy_protocol = $protocol
-  proxy_host = $proxyHost
-  proxy_port = [int]$proxyPort
-  proxy_username = $proxyUser
-  proxy_password = $proxyPass
-  api_url = $apiUrl
-  api_method = "GET"
-  api_timeout = 8
-  api_cache_ttl = 20
-  api_headers = ""
-  api_body = ""
-  api_host_key = "host"
-  api_port_key = "port"
-  api_username_key = "username"
-  api_password_key = "password"
-  api_proxy_field = "proxy"
-  bigdata_api_url = $bigdataApiUrl
-  bigdata_api_token = $bigdataApiToken
-  allowed_client_ips = ""
-  session_secret = $sessionSecret
+Ensure-Admin -PythonBinary $VenvPython -AdminUser $adminUser -AdminPassword $adminPassword
+
+if ($DeployMode -eq "interactive") {
+  $startNow = Read-Host "Start service now? [Y/n]"
+} else {
+  $startNow = "Y"
 }
 
-$settingsJson = $settings | ConvertTo-Json -Depth 2
-Set-Content -Path $SettingsPath -Value $settingsJson -Encoding UTF8
-
-Write-DeployLog "Initialize DB and ensure admin user"
-$env:DB_PATH = $DbPath
-$env:PROXY_ADMIN_USER = $adminUser
-$env:PROXY_ADMIN_PASSWORD = $adminPassword
-& $VenvPython -c @'
-import os
-from app.db import init_db, get_user, create_user
-
-db_path = os.environ["DB_PATH"]
-admin_user = os.environ["PROXY_ADMIN_USER"]
-admin_password = os.environ["PROXY_ADMIN_PASSWORD"]
-
-init_db(db_path)
-if get_user(db_path, admin_user) is None:
-    create_user(db_path, admin_user, admin_password)
-    print(f"Admin created: {admin_user}")
-else:
-    print(f"Admin exists: {admin_user}")
-'@
-
-$startNow = Read-Host "Start service now? [Y/n]"
 if ($startNow -match '^[Nn]$') {
   Write-DeployLog "Skip auto-start. Manual command: .venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port $webPort"
 } else {

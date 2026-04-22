@@ -5,11 +5,23 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- 
+- Windows 一键部署脚本支持 `--start-only` 与 `--interactive` 参数，默认行为调整为非交互启动，配置由 Web 面板完成。
+- `setup.sh` 文档与参数透传补齐，默认启动不再阻塞在交互式代理配置。
 ### Changed
-- 
+- `deploy-windows.ps1` 新增默认非交互模式与公共设置兜底，减少首次部署在 8080/3128 拉起失败时人工误操作。
 ### Fixed
-- 
+- Windows 非交互部署时若未提供代理参数不再要求输入 `Upstream proxy mode`，可直接拉起 Web 服务。
+
+## [1.0.3] - 2026-04-22
+
+### Added
+- Windows 安装器支持 `--start-only/--interactive` 两种部署模式。
+
+### Changed
+- Web 启动入口与 `setup.sh` 提示统一为“默认非交互”。
+
+### Fixed
+- 修复 Windows Git Bash 部署场景下交互式部署参数会拦截自动化启动的问题。
 
 ## [1.0.2] - 2026-04-22
 

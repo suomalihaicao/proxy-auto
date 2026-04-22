@@ -17,10 +17,16 @@ while [[ $# -gt 0 ]]; do
       FORCE_LINUX=1
       shift || true
       ;;
+    --start-only|--interactive|--start|--no-interactive)
+      # keep install mode args for downstream scripts
+      break
+      ;;
     -h|--help)
-      echo "[setup] 用法: ./setup.sh [--windows|--linux]"
-      echo "  --windows  强制使用 Windows 部署脚本"
-      echo "  --linux    强制使用 Linux 部署脚本"
+      echo "[setup] 用法: ./setup.sh [--windows|--linux|--start-only|--interactive]"
+      echo "  --start-only  非交互启动（默认），用于快速把服务拉起到 web 面板里配置"
+      echo "  --interactive 手工写入 settings 与管理员参数"
+      echo "  --linux       强制使用 Linux 部署流程"
+      echo "  --windows     强制使用 Windows 部署脚本"
       exit 0
       ;;
     *)
