@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - `setup.sh` 文档与参数透传补齐，默认启动不再阻塞在交互式代理配置。
 ### Changed
 - `deploy-windows.ps1` 新增默认非交互模式与公共设置兜底，减少首次部署在 8080/3128 拉起失败时人工误操作。
+- Windows 默认启动流程改为新建终端窗口运行服务，并尝试自动打开 Web 登录页。
 ### Fixed
 - Windows 非交互部署时若未提供代理参数不再要求输入 `Upstream proxy mode`，可直接拉起 Web 服务。
 

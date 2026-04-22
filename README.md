@@ -93,6 +93,11 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ./scripts/deploy-windows.ps1 --interactive
 ```
 
+Windows 安装脚本会自动：
+
+- 在新窗口中启动服务进程（关闭该窗口服务将随之结束）
+- 自动打开 Web 管理页（默认登录 `admin / admin123`）
+
 部署脚本会自动完成：
 
 - 检测内网 IP 与公网 IP

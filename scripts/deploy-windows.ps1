@@ -197,6 +197,78 @@ else:
 '@
 }
 
+function Start-ServiceInTerminal {
+  param(
+    [string]$PythonBinary,
+    [string]$WebPort
+  )
+
+  $serviceArgs = "-m uvicorn app.main:app --host 0.0.0.0 --port $WebPort"
+  $serviceCommand = "`"$PythonBinary`" $serviceArgs"
+
+  if (Get-Command powershell.exe -ErrorAction SilentlyContinue) {
+    return Start-Process -FilePath "powershell.exe" -ArgumentList @(
+      "-NoProfile",
+      "-NoExit",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      "Set-Location '$BaseDir'; $serviceCommand"
+    ) -PassThru
+  }
+
+  if (Get-Command cmd.exe -ErrorAction SilentlyContinue) {
+    return Start-Process -FilePath "cmd.exe" -ArgumentList @(
+      "/k",
+      "cd /d `"$BaseDir`" && $serviceCommand"
+    ) -PassThru
+  }
+
+  throw "未找到可用终端程序，无法启动服务窗口"
+}
+
+function Wait-ForServiceReady {
+  param(
+    [string]$Host,
+    [string]$Port,
+    [int]$Attempts = 20,
+    [int]$DelaySeconds = 1
+  )
+
+  $healthUrl = "http://{0}:{1}/health" -f $Host, $Port
+  for ($i = 0; $i -lt $Attempts; $i++) {
+    try {
+      $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 2
+      if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500) {
+        return $true
+      }
+    } catch {
+      Start-Sleep -Seconds $DelaySeconds
+    }
+  }
+  return $false
+}
+
+function Open-WebPanel {
+  param(
+    [string]$Host,
+    [string]$Port,
+    [string]$AdminUser,
+    [string]$AdminPassword
+  )
+
+  $webUrl = "http://{0}:{1}/login" -f $Host, $Port
+  Write-DeployLog ("Web URL: {0}" -f $webUrl)
+  Write-DeployLog ("Default login: {0} / {1}" -f $AdminUser, $AdminPassword)
+
+  try {
+    Start-Process $webUrl
+    Write-DeployLog "浏览器已自动打开"
+  } catch {
+    Write-DeployLog "自动打开浏览器失败，请手动访问: $webUrl"
+  }
+}
+
 function Get-LocalPythonVersion {
   param(
     [string]$Executable,
@@ -697,16 +769,23 @@ if ($DeployMode -eq "interactive") {
 if ($startNow -match '^[Nn]$') {
   Write-DeployLog "Skip auto-start. Manual command: .venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port $webPort"
 } else {
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = $VenvPython
-  $psi.Arguments = "-m uvicorn app.main:app --host 0.0.0.0 --port $webPort"
-  $psi.WorkingDirectory = $BaseDir
-  $psi.UseShellExecute = $false
-  $psi.CreateNoWindow = $false
-  $proc = [System.Diagnostics.Process]::Start($psi)
-  Write-DeployLog "Service started, PID=$($proc.Id)"
+  $publicIp = Get-PublicIp
+  $webHostHint = if ([string]::IsNullOrWhiteSpace($publicIp) -or $publicIp -eq "Public IP not detected") { "127.0.0.1" } else { $publicIp }
+  $proc = Start-ServiceInTerminal -PythonBinary $VenvPython -WebPort $webPort
+  Write-DeployLog "Service terminal started, PID=$($proc.Id)"
+
+  if (Wait-ForServiceReady -Host $webHostHint -Port $webPort -Attempts 20 -DelaySeconds 1) {
+    Open-WebPanel -Host $webHostHint -Port $webPort -AdminUser $adminUser -AdminPassword $adminPassword
+  } else {
+    Write-DeployLog "服务健康检查超时（约20秒），请先手动确认服务是否已启动"
+    Write-DeployLog "建议访问: http://{0}:{1}/login" -f $webHostHint, $webPort
+  }
 }
 
 Write-DeployLog "Deployment completed"
-Write-DeployLog ("Web URL: http://{0}:{1}/login" -f (Get-PublicIp), $webPort)
-Write-DeployLog ("Default login: {0} / {1}" -f $adminUser, $adminPassword)
+if ($startNow -match '^[Nn]$') {
+  $publicIp = Get-PublicIp
+  $webHostHint = if ([string]::IsNullOrWhiteSpace($publicIp) -or $publicIp -eq "Public IP not detected") { "127.0.0.1" } else { $publicIp }
+  Write-DeployLog ("Web URL: http://{0}:{1}/login" -f $webHostHint, $webPort)
+  Write-DeployLog ("Default login: {0} / {1}" -f $adminUser, $adminPassword)
+}
