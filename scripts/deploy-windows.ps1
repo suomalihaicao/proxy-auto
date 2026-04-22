@@ -34,9 +34,9 @@ function Write-DeployLog {
 }
 
 function Show-Usage {
-  Write-Host "[deploy] 用法: .\deploy-windows.ps1 [--start-only|--interactive]"
-  Write-Host "[deploy]  --start-only     非交互模式（默认），仅拉起服务，参数/代理配置请去 Web 面板"
-  Write-Host "[deploy]  --interactive    交互式写入 settings 与管理员参数（可选）"
+  Write-Host "[deploy] usage: .\deploy-windows.ps1 [--start-only|--interactive]"
+  Write-Host "[deploy]  --start-only     non-interactive mode (default), only start service, configure proxy settings in web panel"
+  Write-Host "[deploy]  --interactive    interactive mode, write settings and admin parameters manually"
 }
 
 foreach ($arg in $args) {
@@ -60,7 +60,7 @@ if ($NonInteractiveDefault -and $DeployMode -ne "interactive") {
 }
 
 if ($DeployMode -eq "start_only") {
-  Write-DeployLog "当前为非交互模式：跳过终端内代理参数输入，服务启动后请到 Web 面板配置"
+  Write-DeployLog "Non-interactive mode: skip proxy parameter prompts in terminal; configure in web panel after service starts."
 }
 
 function Parse-IntValue {
@@ -150,7 +150,7 @@ function Ensure-DefaultSettings {
     return
   }
 
-  Write-DeployLog "settings.json 不存在，创建默认配置（直接模式，Web/代理参数请到面板配置）"
+  Write-DeployLog "settings.json not found, create default config (direct mode). Configure web/proxy settings in dashboard."
   Write-DeploymentSettings `
     -ListenHost "0.0.0.0" `
     -ListenPort "3128" `
@@ -233,7 +233,7 @@ function Start-ServiceInTerminal {
     ) -PassThru
   }
 
-  throw "未找到可用终端程序，无法启动服务窗口"
+  throw "No terminal executable found, cannot start service window"
 }
 
 function Wait-ForServiceReady {
@@ -272,9 +272,9 @@ function Open-WebPanel {
 
   try {
     Start-Process $webUrl
-    Write-DeployLog "浏览器已自动打开"
+    Write-DeployLog "Browser opened automatically"
   } catch {
-    Write-DeployLog "自动打开浏览器失败，请手动访问: $webUrl"
+    Write-DeployLog "Failed to open browser automatically, please visit: $webUrl"
   }
 }
 
@@ -786,8 +786,8 @@ if ($startNow -match '^[Nn]$') {
   if (Wait-ForServiceReady -Host $webHostHint -Port $webPort -Attempts 20 -DelaySeconds 1) {
     Open-WebPanel -Host $webHostHint -Port $webPort -AdminUser $adminUser -AdminPassword $adminPassword
   } else {
-    Write-DeployLog "服务健康检查超时（约20秒），请先手动确认服务是否已启动"
-    Write-DeployLog "建议访问: http://{0}:{1}/login" -f $webHostHint, $webPort
+    Write-DeployLog "Health check timeout (about 20s), please verify the service status manually."
+    Write-DeployLog "Suggested URL: http://{0}:{1}/login" -f $webHostHint, $webPort
   }
 }
 
