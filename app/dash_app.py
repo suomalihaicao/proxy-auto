@@ -950,7 +950,7 @@ def create_dash_app() -> Dash:
     app = Dash(
         __name__,
         requests_pathname_prefix="/ui/",
-        routes_pathname_prefix="/ui/",
+        routes_pathname_prefix="/",
         suppress_callback_exceptions=True,
         assets_folder=str(BASE_DIR / "app" / "assets"),
     )
