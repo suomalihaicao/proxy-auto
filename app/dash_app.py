@@ -236,7 +236,6 @@ def _build_layout():
                                 {"name": "分组", "id": "group_name"},
                             ],
                             data=[],
-                            row_id="id",
                             row_selectable="multi",
                             page_size=20,
                             style_cell={"padding": "8px", "fontSize": "13px"},
