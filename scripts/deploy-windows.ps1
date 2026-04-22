@@ -297,14 +297,19 @@ function Start-ServiceInTerminal {
 
 function Ensure-WebPortFree {
   param([int]$Port)
+  if ($Port -le 0 -or $Port -gt 65535) {
+    throw "无效端口: $Port"
+  }
+
   $getPids = {
+    param([int]$PortToCheck)
     $pids = @()
 
     try {
-      $listeners = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop
+      $listeners = Get-NetTCPConnection -State Listen -LocalPort $PortToCheck -ErrorAction Stop
       $pids = $listeners | ForEach-Object { $_.OwningProcess } | Where-Object { $_ -ne $null } | Sort-Object -Unique
     } catch {
-      $pattern = "TCP\s+\S+:$Port\s+\S+\s+LISTENING\s+(\d+)"
+      $pattern = "TCP\s+\S+:$PortToCheck\s+\S+\s+LISTENING\s+(\d+)"
       $netstat = netstat -ano -p tcp 2>$null | Select-String -Pattern $pattern
       if ($netstat -and $netstat.Matches) {
         foreach ($match in $netstat.Matches) {
@@ -322,7 +327,7 @@ function Ensure-WebPortFree {
     return $pids
   }
 
-  $pids = & $getPids
+  $pids = & $getPids -PortToCheck $Port
   if (-not $pids -or $pids.Count -eq 0) {
     Write-DeployLog "端口 ${Port} 当前空闲"
     return
@@ -348,14 +353,14 @@ function Ensure-WebPortFree {
   $retries = 6
   for ($i = 0; $i -lt $retries; $i++) {
     Start-Sleep -Seconds 1
-    $remaining = & $getPids
+    $remaining = & $getPids -PortToCheck $Port
     if (-not $remaining -or $remaining.Count -eq 0) {
       Write-DeployLog "端口 ${Port} 已释放"
       return
     }
   }
 
-  throw "端口 ${Port} 仍被占用（PIDs: $($pids -join ',')），请先释放端口后再启动。"
+  throw "端口 ${Port} 仍被占用（Pids: $($pids -join ',')），请先释放端口后再启动。"
 }
 
 function Get-WebLoginUrl {
