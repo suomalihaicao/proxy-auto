@@ -15,12 +15,45 @@ PIP_CACHE_DIR="$ENV_TOOLS_DIR/pip-cache"
 LOG_TAG="[deploy]"
 PYTHON_REQ_MAJOR=3
 PYTHON_REQ_MINOR=10
+DEPLOY_MODE="start_only"
 
 mkdir -p "$DATA_DIR" "$ENV_TOOLS_DIR" "$ENV_TOOLS_BIN" "$PIP_CACHE_DIR"
 
 log() {
-  echo "$LOG_TAG $*"
+  echo "$LOG_TAG $*" >&2
 }
+
+usage() {
+  cat <<'EOF'
+[deploy] 用法:
+  ./scripts/deploy-linux.sh [--start-only|--interactive]
+
+--start-only     仅启动服务（默认），不做交互式配置。
+--interactive    执行原有交互式部署流程，可一次性写入 settings 与数据库。
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --start-only|--start|--no-interactive)
+      DEPLOY_MODE="start_only"
+      shift
+      ;;
+    --interactive)
+      DEPLOY_MODE="interactive"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      log "参数不支持: $1"
+      usage
+      exit 1
+      ;;
+  esac
+done
 
 log "启动部署前环境检查..."
 log "Linux 最低要求: Bash + Python ${PYTHON_REQ_MAJOR}.${PYTHON_REQ_MINOR}+（含 venv）+ curl 或 wget + git（可选）"
@@ -501,90 +534,91 @@ log "安装依赖到项目虚拟环境（cache: $PIP_CACHE_DIR）"
 "$VENV_PIP" install --disable-pip-version-check --no-input --upgrade pip -i "$PIP_INDEX"
 "$VENV_PIP" install --disable-pip-version-check --no-input -i "$PIP_INDEX" -r "$BASE_DIR/requirements.txt"
 
-read -r -p "上游代理模式 [single_ip/api/bigdata_api/direct] (回车默认 single_ip): " proxy_mode
-proxy_mode="${proxy_mode:-single_ip}"
-api_url=""
-bigdata_api_url=""
-bigdata_api_token=""
-proxy_protocol="http"
-proxy_host=""
-proxy_port=0
-proxy_user=""
-proxy_pass=""
+if [[ "$DEPLOY_MODE" == "interactive" ]]; then
+  read -r -p "上游代理模式 [single_ip/api/bigdata_api/direct] (回车默认 single_ip): " proxy_mode
+  proxy_mode="${proxy_mode:-single_ip}"
+  api_url=""
+  bigdata_api_url=""
+  bigdata_api_token=""
+  proxy_protocol="http"
+  proxy_host=""
+  proxy_port=0
+  proxy_user=""
+  proxy_pass=""
 
-case "$proxy_mode" in
-  http|socks5)
-    proxy_protocol="$proxy_mode"
-    proxy_mode="single_ip"
-    ;;
-  single_ip|api|bigdata_api|direct) ;;
-  *)
-    log "不支持的模式: $proxy_mode"
-    exit 1
-    ;;
-esac
+  case "$proxy_mode" in
+    http|socks5)
+      proxy_protocol="$proxy_mode"
+      proxy_mode="single_ip"
+      ;;
+    single_ip|api|bigdata_api|direct) ;;
+    *)
+      log "不支持的模式: $proxy_mode"
+      exit 1
+      ;;
+  esac
 
-if [[ "$proxy_mode" == "single_ip" ]]; then
-  read -r -p "单 IP 代理协议 [http/socks5] (回车默认 http): " protocol_input
-  proxy_protocol="${protocol_input:-http}"
-  if [[ "$proxy_protocol" != "http" && "$proxy_protocol" != "socks5" ]]; then
-    log "不支持的协议: $proxy_protocol"
-    exit 1
+  if [[ "$proxy_mode" == "single_ip" ]]; then
+    read -r -p "单 IP 代理协议 [http/socks5] (回车默认 http): " protocol_input
+    proxy_protocol="${protocol_input:-http}"
+    if [[ "$proxy_protocol" != "http" && "$proxy_protocol" != "socks5" ]]; then
+      log "不支持的协议: $proxy_protocol"
+      exit 1
+    fi
+    read -r -p "单 IP 代理地址 (例如: 127.0.0.1): " proxy_host
+    read -r -p "单 IP 代理端口 (例如: 8080): " proxy_port
+    read -r -p "单 IP 账号（可空）: " proxy_user
+    read -r -s -p "单 IP 密码（可空）: " proxy_pass
+    echo
   fi
-  read -r -p "单 IP 代理地址 (例如: 127.0.0.1): " proxy_host
-  read -r -p "单 IP 代理端口 (例如: 8080): " proxy_port
-  read -r -p "单 IP 账号（可空）: " proxy_user
-  read -r -s -p "单 IP 密码（可空）: " proxy_pass
+
+  if [[ "$proxy_mode" == "api" ]]; then
+    read -r -p "API 地址（必填）: " api_url
+    if [[ -z "$api_url" ]]; then
+      log "API 模式请填写 api_url"
+      exit 1
+    fi
+  elif [[ "$proxy_mode" == "bigdata_api" ]]; then
+    read -r -p "BigData API 地址: " bigdata_api_url
+    read -r -p "API 地址（可空，作为 fallback）: " api_url
+    read -r -p "BigData Token（可空）: " bigdata_api_token
+    if [[ -z "$api_url" && -z "$bigdata_api_url" ]]; then
+      log "BigData 模式至少需要填写 bigdata_api_url 或 api_url"
+      exit 1
+    fi
+  fi
+
+  read -r -p "代理监听地址 [0.0.0.0]: " listen_host
+  listen_host="${listen_host:-0.0.0.0}"
+  read -r -p "代理监听端口 [3128]: " listen_port
+  listen_port="${listen_port:-3128}"
+  read -r -p "Web 监听端口 [8080]: " web_port
+  web_port="${web_port:-8080}"
+
+  read -r -p "管理员用户名 [admin]: " admin_user
+  admin_user="${admin_user:-admin}"
+  read -r -s -p "管理员密码 [admin123]: " admin_password
   echo
-fi
+  admin_password="${admin_password:-admin123}"
 
-if [[ "$proxy_mode" == "api" ]]; then
-  read -r -p "API 地址（必填）: " api_url
-  if [[ -z "$api_url" ]]; then
-    log "API 模式请填写 api_url"
-    exit 1
-  fi
-elif [[ "$proxy_mode" == "bigdata_api" ]]; then
-  read -r -p "BigData API 地址: " bigdata_api_url
-  read -r -p "API 地址（可空，作为 fallback）: " api_url
-  read -r -p "BigData Token（可空）: " bigdata_api_token
-  if [[ -z "$api_url" && -z "$bigdata_api_url" ]]; then
-    log "BigData 模式至少需要填写 bigdata_api_url 或 api_url"
-    exit 1
-  fi
-fi
-
-read -r -p "代理监听地址 [0.0.0.0]: " listen_host
-listen_host="${listen_host:-0.0.0.0}"
-read -r -p "代理监听端口 [3128]: " listen_port
-listen_port="${listen_port:-3128}"
-read -r -p "Web 监听端口 [8080]: " web_port
-web_port="${web_port:-8080}"
-
-read -r -p "管理员用户名 [admin]: " admin_user
-admin_user="${admin_user:-admin}"
-read -r -s -p "管理员密码 [admin123]: " admin_password
-echo
-admin_password="${admin_password:-admin123}"
-
-if command -v openssl >/dev/null 2>&1; then
-  session_secret="$(openssl rand -hex 24)"
-else
-  session_secret="$("$VENV_DIR/bin/python" - <<'PY'
+  if command -v openssl >/dev/null 2>&1; then
+    session_secret="$(openssl rand -hex 24)"
+  else
+    session_secret="$("$VENV_DIR/bin/python" - <<'PY'
 import secrets
 print(secrets.token_hex(24))
 PY
 )"
-fi
+  fi
 
-build_settings \
-  "$proxy_mode" "$proxy_protocol" "$proxy_host" "$proxy_port" "$proxy_user" "$proxy_pass" \
-  "$api_url" "$bigdata_api_url" "$bigdata_api_token" \
-  "$listen_host" "$listen_port" "$web_port" "$session_secret"
+  build_settings \
+    "$proxy_mode" "$proxy_protocol" "$proxy_host" "$proxy_port" "$proxy_user" "$proxy_pass" \
+    "$api_url" "$bigdata_api_url" "$bigdata_api_token" \
+    "$listen_host" "$listen_port" "$web_port" "$session_secret"
 
-log "初始化数据库并创建管理员账号..."
-PROXY_ADMIN_USER="$admin_user" \
-PROXY_ADMIN_PASSWORD="$admin_password" \
+  log "初始化数据库并创建管理员账号..."
+  PROXY_ADMIN_USER="$admin_user" \
+  PROXY_ADMIN_PASSWORD="$admin_password" \
 DB_PATH="$DB_PATH" \
 "$VENV_DIR/bin/python" - <<'PY'
 import os
@@ -602,13 +636,17 @@ else:
     print(f"管理员已存在: {admin_user}")
 PY
 
-read -r -p "部署完成后立即启动服务？[Y/n]: " start_now
-if [[ "${start_now:-Y}" =~ ^[Nn]$ ]]; then
-  log "已跳过启动，后续可执行: bash scripts/restart-public-8080.sh"
+  read -r -p "部署完成后立即启动服务？[Y/n]: " start_now
+  if [[ "${start_now:-Y}" =~ ^[Nn]$ ]]; then
+    log "已跳过启动，后续可执行: bash scripts/restart-public-8080.sh"
+  else
+    bash "$BASE_DIR/scripts/restart-public-8080.sh"
+  fi
+
+  log "部署完成"
+  log "Web 地址: http://$(detect_public_ip):$web_port/login"
+  log "默认登录: ${admin_user} / ${admin_password}"
 else
+  log "部署完成后将直接启动服务（非交互模式）。参数/代理配置请在 Web 面板配置。"
   bash "$BASE_DIR/scripts/restart-public-8080.sh"
 fi
-
-log "部署完成"
-log "Web 地址: http://$(detect_public_ip):$web_port/login"
-log "默认登录: ${admin_user} / ${admin_password}"

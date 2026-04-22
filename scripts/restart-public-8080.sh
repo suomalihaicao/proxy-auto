@@ -1,12 +1,44 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_DIR="/root/domain-proxy-manager"
+BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_DIR="$BASE_DIR/data"
 SETTINGS_FILE="$DATA_DIR/settings.json"
 LOG_FILE="/tmp/domain-proxy-manager.log"
 SERVICE_NAME="domain-proxy-manager"
 PID_FILE="/tmp/domain-proxy-manager-8080.pid"
+DB_PATH="$DATA_DIR/app.db"
+DEFAULT_ADMIN_USER="${PROXY_ADMIN_USER:-admin}"
+DEFAULT_ADMIN_PASSWORD="${PROXY_ADMIN_PASSWORD:-admin123}"
+
+ensure_default_admin() {
+  local python_bin="$1"
+  local db_path="$2"
+  local admin_user="$3"
+  local admin_password="$4"
+
+  RESTART_DB_PATH="$db_path" \
+  RESTART_ADMIN_USER="$admin_user" \
+  RESTART_ADMIN_PASSWORD="$admin_password" \
+  "$python_bin" - <<'PY'
+from pathlib import Path
+import os
+
+from app.db import init_db, get_user, create_user
+
+
+db_path = Path(os.environ["RESTART_DB_PATH"])
+admin_user = os.environ["RESTART_ADMIN_USER"]
+admin_password = os.environ["RESTART_ADMIN_PASSWORD"]
+
+init_db(db_path)
+if get_user(db_path, admin_user) is None:
+    create_user(db_path, admin_user, admin_password)
+    print(f"已创建默认管理员: {admin_user}")
+else:
+    print(f"默认管理员已存在: {admin_user}")
+PY
+}
 
 wait_for_health() {
   local host="$1"
@@ -52,9 +84,16 @@ cleanup_old_instances() {
 cd "$BASE_DIR"
 
 if [[ ! -d "$BASE_DIR/.venv" ]]; then
-  echo "缺少 .venv，请先执行 scripts/install.sh"
+  echo "缺少 .venv，请先执行 ./setup.sh 或 ./scripts/deploy-linux.sh 进行环境初始化"
   exit 1
 fi
+
+if [[ ! -x "$BASE_DIR/.venv/bin/python" ]]; then
+  echo "缺少虚拟环境解释器: $BASE_DIR/.venv/bin/python"
+  exit 1
+fi
+
+ensure_default_admin "$BASE_DIR/.venv/bin/python" "$DB_PATH" "$DEFAULT_ADMIN_USER" "$DEFAULT_ADMIN_PASSWORD"
 
 if [[ -f "$SETTINGS_FILE" ]]; then
   BASE_DIR="$BASE_DIR" python3 - <<'PY'
@@ -64,8 +103,8 @@ from pathlib import Path
 
 settings_path = Path(os.environ["BASE_DIR"]) / "data" / "settings.json"
 cfg = json.loads(settings_path.read_text(encoding="utf-8"))
-cfg["web_host"] = "0.0.0.0"
-cfg["web_port"] = 8080
+cfg.setdefault("web_host", "0.0.0.0")
+cfg["web_port"] = int(cfg.get("web_port", 8080))
 if "proxy_mode" not in cfg:
     cfg["proxy_mode"] = "direct"
 cfg.setdefault("proxy_protocol", "http")
@@ -152,13 +191,20 @@ else
       echo "  未检测到 ss 工具，已跳过监听列表输出"
     fi
   else
-    echo "启动失败: 8080 健康检查超时（约 25s）"
-    echo "日志尾部："
-    tail -n 80 "$LOG_FILE" 2>/dev/null || true
-    echo
-    echo "排查建议："
-    echo "1. 检查服务进程是否在运行：ps -ef | grep uvicorn"
-    echo "2. 手动前台启动看直接报错：cd $BASE_DIR && ./.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8080"
-    exit 1
+    echo "健康检查超时（约 25s），将继续输出日志供你确认"
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      echo "服务进程仍在运行 (pid: $pid)"
+      echo "最新日志："
+      tail -n 60 "$LOG_FILE" 2>/dev/null || true
+    else
+      echo "启动失败: 8080 健康检查超时且进程退出"
+      echo "日志尾部："
+      tail -n 80 "$LOG_FILE" 2>/dev/null || true
+      echo
+      echo "排查建议："
+      echo "1. 检查服务进程是否在运行：ps -ef | grep uvicorn"
+      echo "2. 手动前台启动看直接报错：cd $BASE_DIR && ./.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8080"
+      exit 1
+    fi
   fi
 fi

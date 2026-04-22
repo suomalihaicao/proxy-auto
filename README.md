@@ -1,6 +1,6 @@
 # Domain Proxy Manager
 
-版本：v1.0.0
+版本：v1.0.1
 
 一个带登录的轻量代理网关管理器，用于在 Linux/Windows 上统一处理“部分域名走上游代理、其他域名直连”的场景。
 
@@ -55,6 +55,15 @@ chmod +x scripts/deploy-linux.sh
 ./scripts/deploy-linux.sh
 ```
 
+> 默认是非交互启动模式：拉起服务，不在脚本里设置代理参数。  
+> 代理模式、域名规则、监听端口等请在 Web 页面中配置。
+
+如需一次性通过命令行重建 `settings` 与管理员，使用：
+
+```bash
+./scripts/deploy-linux.sh --interactive
+```
+
 Windows 下运行（PowerShell）：
 
 ```powershell
@@ -69,11 +78,10 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 - 自动创建/复用项目内 `.venv`
 - 测速 `阿里源` 与 `官方源` 并自动选择更快源
 - 安装 `requirements.txt` 依赖到项目目录（`./env_tools/pip-cache` 缓存）
-- 生成 `data/settings.json`
-- 初始化数据库并创建默认管理员（默认 `admin` / `admin123`，可修改）
-- 可选启动 `8080` 管理页面和 `3128` 代理端口
+- 初始化数据库并确保默认管理员（默认 `admin` / `admin123`，可修改）
+- 启动服务（`8080` 管理、`3128` 代理）
 
-如果你想把这个流程用于自动化部署，也可以后续把脚本参数化（目前是交互式向导）。
+如需可复现的自动化部署场景，请配合 `--start-only` 或 `--interactive` 做参数化。
 
 ## 环境自动安装说明
 
