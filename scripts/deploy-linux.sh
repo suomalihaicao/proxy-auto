@@ -91,6 +91,42 @@ python_acceptable() {
   return 0
 }
 
+resolve_venv_python() {
+  local venv_dir="$1"
+  local candidates=(
+    "$venv_dir/bin/python"
+    "$venv_dir/bin/python3"
+    "$venv_dir/Scripts/python.exe"
+    "$venv_dir/Scripts/python3.exe"
+  )
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -x "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+resolve_venv_pip() {
+  local venv_dir="$1"
+  local candidates=(
+    "$venv_dir/bin/pip"
+    "$venv_dir/bin/pip3"
+    "$venv_dir/Scripts/pip.exe"
+    "$venv_dir/Scripts/pip3.exe"
+  )
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -x "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 python_venv_ok() {
   local target="$1"
   "$target" -m venv --help >/dev/null 2>&1
@@ -138,8 +174,8 @@ download_file() {
 
 ensure_venv_pip() {
   local venv_dir="$1"
-  local python_bin="$venv_dir/bin/python"
-  local pip_bin="$venv_dir/bin/pip"
+  local python_bin="$2"
+  local pip_bin=""
   local get_pip_script="$ENV_TOOLS_DIR/get-pip.py"
 
   if [[ ! -x "$python_bin" ]]; then
@@ -147,27 +183,18 @@ ensure_venv_pip() {
     return 1
   fi
 
-  if python_has_pip "$python_bin"; then
-    if [[ -x "$pip_bin" ]]; then
-      echo "$pip_bin"
-      return 0
-    fi
-    pip_bin="$venv_dir/bin/pip3"
-    if [[ -x "$pip_bin" ]]; then
-      echo "$pip_bin"
-      return 0
-    fi
+  pip_bin="$(resolve_venv_pip "$venv_dir")"
+  if [[ -n "$pip_bin" ]] && python_has_pip "$python_bin"; then
+    echo "$pip_bin"
+    return 0
   fi
 
   log "虚拟环境缺少 pip，尝试通过 ensurepip 修复..."
   if "$python_bin" -m ensurepip --upgrade >/dev/null 2>&1; then
     if python_has_pip "$python_bin"; then
-      if [[ -x "$venv_dir/bin/pip" ]]; then
-        echo "$venv_dir/bin/pip"
-        return 0
-      fi
-      if [[ -x "$venv_dir/bin/pip3" ]]; then
-        echo "$venv_dir/bin/pip3"
+      pip_bin="$(resolve_venv_pip "$venv_dir")"
+      if [[ -n "$pip_bin" ]]; then
+        echo "$pip_bin"
         return 0
       fi
     fi
@@ -181,12 +208,9 @@ ensure_venv_pip() {
   }
   "$python_bin" "$get_pip_script" --no-warn-script-location >/dev/null
   if python_has_pip "$python_bin"; then
-    if [[ -x "$venv_dir/bin/pip" ]]; then
-      echo "$venv_dir/bin/pip"
-      return 0
-    fi
-    if [[ -x "$venv_dir/bin/pip3" ]]; then
-      echo "$venv_dir/bin/pip3"
+    pip_bin="$(resolve_venv_pip "$venv_dir")"
+    if [[ -n "$pip_bin" ]]; then
+      echo "$pip_bin"
       return 0
     fi
   fi
@@ -446,7 +470,7 @@ build_settings() {
   PY_PROXY_PROTOCOL="$proxy_protocol" PY_PROXY_HOST="$proxy_host" PY_PROXY_PORT="$proxy_port" \
   PY_PROXY_USER="$proxy_username" PY_PROXY_PASS="$proxy_password" PY_API_URL="$api_url" \
   PY_BIGDATA_API_URL="$bigdata_api_url" PY_BIGDATA_API_TOKEN="$bigdata_api_token" \
-  PY_SESSION_SECRET="$session_secret" "$VENV_DIR/bin/python" - <<'PY'
+  PY_SESSION_SECRET="$session_secret" "$VENV_PYTHON" - <<'PY'
 from pathlib import Path
 import json
 import os
@@ -510,20 +534,38 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
 fi
 require_cmd git || log "未检测到 git（非必须，但不影响本脚本）"
 
-if [[ -x "$VENV_DIR/bin/python" ]]; then
-  if ! "$VENV_DIR/bin/python" -V >/dev/null 2>&1; then
+if [[ -d "$VENV_DIR" ]]; then
+  VENV_PYTHON="$(resolve_venv_python "$VENV_DIR" || true)"
+  if [[ -n "${VENV_PYTHON:-}" ]] && ! "$VENV_PYTHON" -V >/dev/null 2>&1; then
     log "现有虚拟环境异常，准备重建 $VENV_DIR ..."
     rm -rf "$VENV_DIR"
   fi
 fi
 
-if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+if [[ ! -d "$VENV_DIR" ]]; then
   log "未检测到现有虚拟环境，正在创建 $VENV_DIR ..."
   "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
-if ! PYTHON_BIN_FOR_PIP="$(ensure_venv_pip "$VENV_DIR")"; then
+
+VENV_PYTHON="$(resolve_venv_python "$VENV_DIR" || true)"
+if [[ -z "${VENV_PYTHON:-}" ]]; then
+  log "虚拟环境解释器异常: $VENV_DIR/.venv"
+  exit 1
+fi
+
+if ! PYTHON_BIN_FOR_PIP="$(ensure_venv_pip "$VENV_DIR" "$VENV_PYTHON")"; then
+  log "虚拟环境 pip 不可用，准备重建并重试一次"
+  rm -rf "$VENV_DIR"
+  "$PYTHON_BIN" -m venv "$VENV_DIR"
+  VENV_PYTHON="$(resolve_venv_python "$VENV_DIR" || true)"
+  if [[ -z "${VENV_PYTHON:-}" ]]; then
+    log "重建后仍未检测到虚拟环境解释器: $VENV_DIR/.venv"
+    exit 1
+  fi
+  if ! PYTHON_BIN_FOR_PIP="$(ensure_venv_pip "$VENV_DIR" "$VENV_PYTHON")"; then
   log "未能修复虚拟环境里的 pip，退出部署"
   exit 1
+  fi
 fi
 VENV_PIP="$PYTHON_BIN_FOR_PIP"
 
@@ -604,7 +646,7 @@ if [[ "$DEPLOY_MODE" == "interactive" ]]; then
   if command -v openssl >/dev/null 2>&1; then
     session_secret="$(openssl rand -hex 24)"
   else
-    session_secret="$("$VENV_DIR/bin/python" - <<'PY'
+    session_secret="$("$VENV_PYTHON" - <<'PY'
 import secrets
 print(secrets.token_hex(24))
 PY
@@ -620,7 +662,7 @@ PY
   PROXY_ADMIN_USER="$admin_user" \
   PROXY_ADMIN_PASSWORD="$admin_password" \
 DB_PATH="$DB_PATH" \
-"$VENV_DIR/bin/python" - <<'PY'
+"$VENV_PYTHON" - <<'PY'
 import os
 from app.db import init_db, get_user, create_user
 

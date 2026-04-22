@@ -82,6 +82,70 @@ function Install-PythonWithManager {
   return $false
 }
 
+function Get-PythonInstallerLatency {
+  param([string]$Url)
+  try {
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $resp = Invoke-WebRequest -Uri $Url -Method Head -UseBasicParsing -TimeoutSec 6 -MaximumRedirection 5 -ErrorAction Stop
+    $sw.Stop()
+    if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 400) {
+      return [double]$sw.Elapsed.TotalSeconds
+    }
+  } catch {
+    try {
+      $sw = [System.Diagnostics.Stopwatch]::StartNew()
+      $resp = Invoke-WebRequest -Uri $Url -Method Get -UseBasicParsing -TimeoutSec 6 -MaximumRedirection 5 -ErrorAction Stop
+      $sw.Stop()
+      if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 400) {
+        return [double]$sw.Elapsed.TotalSeconds
+      }
+    } catch {
+      return $null
+    }
+  }
+  return $null
+}
+
+function Select-FastestPythonInstaller {
+  param(
+    [string]$ArchitectureTag,
+    [string]$InstallerVersion
+  )
+
+  $installerFile = "python-$InstallerVersion-$ArchitectureTag.exe"
+  $candidates = @(
+    @{ Name = "Python 官方"; Url = "https://www.python.org/ftp/python/$InstallerVersion/$installerFile" },
+    @{ Name = "阿里源"; Url = "https://mirrors.aliyun.com/python/$InstallerVersion/$installerFile" },
+    @{ Name = "华为源"; Url = "https://mirrors.huaweicloud.com/python/$InstallerVersion/$installerFile" }
+  )
+
+  $best = [double]::PositiveInfinity
+  $selected = $candidates[0].Url
+  $hasAvailable = $false
+
+  foreach ($candidate in $candidates) {
+    $latency = Get-PythonInstallerLatency -Url $candidate.Url
+    if ($null -ne $latency) {
+      Write-DeployLog ("Python 安装包可用: {0} | 延迟={1}s" -f $candidate.Name, [math]::Round($latency, 3))
+      if ($latency -lt $best) {
+        $best = $latency
+        $selected = $candidate.Url
+      }
+      $hasAvailable = $true
+    } else {
+      Write-DeployLog ("Python 安装包不可达: {0} ({1})" -f $candidate.Name, $candidate.Url)
+    }
+  }
+
+  if (-not $hasAvailable) {
+    Write-DeployLog "Python 安装包源探测失败，回退官方源"
+    return "https://www.python.org/ftp/python/$InstallerVersion/$installerFile"
+  }
+
+  Write-DeployLog ("已选择最快 Python 安装源: {0}" -f $selected)
+  return $selected
+}
+
 function Install-PythonToEnvTools {
   $archTag = ""
   switch ($env:PROCESSOR_ARCHITECTURE) {
@@ -93,14 +157,14 @@ function Install-PythonToEnvTools {
 
   $installerVersion = "3.11.9"
   $installerFile = "python-$installerVersion-$archTag.exe"
-  $installerUrl = "https://www.python.org/ftp/python/$installerVersion/$installerFile"
+  $installerUrl = Select-FastestPythonInstaller -ArchitectureTag $archTag -InstallerVersion $installerVersion
   $installerPath = Join-Path $EnvToolsDir $installerFile
 
-  Write-DeployLog "尝试下载官方安装包到项目目录：$installerUrl"
+  Write-DeployLog "尝试下载 Python 安装包到项目目录：$installerUrl"
   try {
     Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing -MaximumRedirection 10 | Out-Null
   } catch {
-    Write-DeployLog "官方安装包下载失败：$($_.Exception.Message)"
+    Write-DeployLog "Python 安装包下载失败：$($_.Exception.Message)"
     return $false
   }
 

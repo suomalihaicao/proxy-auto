@@ -11,6 +11,19 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - 
 
+## [1.0.2] - 2026-04-22
+
+### Added
+- `setup.sh` 支持在 `Git Bash/MINGW/MSYS/CYGWIN` 下自动分流到 `deploy-windows.ps1`，避免误走 Linux 部署逻辑。
+- Windows 安装器新增 Python 安装源测速与选择，优先下载可达且响应更快的源到 `env_tools\python`。
+
+### Changed
+- Linux 部署脚本增强虚拟环境解释器/脚本路径识别（兼容 `bin` 与 `Scripts` 下常见命令名），降低不同运行环境误判概率。
+- Linux 部署在首次检测到虚拟环境 pip 缺失时，自动重建虚拟环境后重试修复逻辑。
+
+### Fixed
+- 修复 `./setup.sh` 在 Windows Git Bash 场景下误调用 Linux 流程导致 `.venv/bin/python` 缺失并直接退出的问题。
+
 ## [1.0.1] - 2026-04-22
 
 ### Added

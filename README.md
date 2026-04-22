@@ -1,6 +1,6 @@
 # Domain Proxy Manager
 
-版本：v1.0.1
+版本：v1.0.2
 
 一个带登录的轻量代理网关管理器，用于在 Linux/Windows 上统一处理“部分域名走上游代理、其他域名直连”的场景。
 
@@ -42,8 +42,10 @@ Windows 下可用：
 
 ```powershell
 Set-Location C:\path\to\domain-proxy-manager
-bash setup.sh --windows
+./setup.sh
 ```
+
+在 Git Bash 下直接运行 `./setup.sh`，会自动识别到 Windows 环境并调用 PowerShell 部署脚本；如需强制 Linux 路径，可加 `--linux`。
 
 ## 一键部署
 
