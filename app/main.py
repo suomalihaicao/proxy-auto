@@ -120,6 +120,17 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 app.mount("/ui", WSGIMiddleware(create_dash_app().server), name="ui")
 
 
+@app.middleware("http")
+async def _web_access_middleware(request: Request, call_next):
+    if request.url.path.startswith("/ui"):
+        if not _ip_allowed(request):
+            return JSONResponse(status_code=403, content={"detail": "Forbidden: IP not in allowlist"})
+        if not request.cookies.get(COOKIE_NAME):
+            return RedirectResponse(url="/login", status_code=303)
+    response = await call_next(request)
+    return response
+
+
 def _load_secret() -> str:
     settings = load_settings(SETTINGS_PATH)
     return settings.session_secret or os.urandom(24).hex()
