@@ -1,39 +1,23 @@
 from __future__ import annotations
 
 import ipaddress
-import os
-import sqlite3
+import html
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.wsgi import WSGIMiddleware
 
+from .auth import COOKIE_NAME, parse_user, sign_user
 from .config import ProxySettings, load_settings, save_settings
 from .dash_app import create_dash_app
-from .auth import COOKIE_NAME, parse_user, sign_user
 from .db import (
-    add_proxy_group,
-    add_rule,
-    batch_delete_rules,
-    batch_move_rules,
     ensure_default_proxy_group,
-    create_user,
-    get_proxy_group,
     init_db,
     list_proxy_groups,
-    list_rules,
-    list_users,
-    remove_proxy_group,
-    remove_rule,
-    update_proxy_group,
-    update_user_password,
-    user_exists,
     verify_user,
 )
 from .proxy import ProxyGateway
@@ -60,8 +44,6 @@ def _ensure_init_files() -> ProxySettings:
     settings.proxy_mode = _normalize_proxy_mode(settings.proxy_mode)
     changed = False
 
-    # Keep existing one-click install compatibility: if db has no proxy group
-    # yet, create one by migration from legacy settings fields.
     groups = list_proxy_groups(DB_PATH)
     if not groups:
         default_group_id = ensure_default_proxy_group(
@@ -89,7 +71,7 @@ def _ensure_init_files() -> ProxySettings:
         settings.default_proxy_group_id = default_group_id
         changed = True
     else:
-        group_ids = {int(g["id"]) for g in groups}
+        group_ids = {int(group["id"]) for group in groups}
         default_group_id = int(settings.default_proxy_group_id or 1)
         if default_group_id not in group_ids:
             settings.default_proxy_group_id = min(group_ids)
@@ -114,94 +96,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.mount("/ui", WSGIMiddleware(create_dash_app().server), name="ui")
-
-
-@app.middleware("http")
-async def _web_access_middleware(request: Request, call_next):
-    if request.url.path.startswith("/ui"):
-        if not _ip_allowed(request):
-            return JSONResponse(status_code=403, content={"detail": "Forbidden: IP not in allowlist"})
-        if not request.cookies.get(COOKIE_NAME):
-            return RedirectResponse(url="/login", status_code=303)
-    response = await call_next(request)
-    return response
-
-
-def _load_secret() -> str:
-    settings = load_settings(SETTINGS_PATH)
-    return settings.session_secret or os.urandom(24).hex()
-
-
-app.add_middleware(SessionMiddleware, secret_key=_load_secret())
-
-
-def current_user(request: Request) -> str:
-    token = request.cookies.get(COOKIE_NAME)
-    if not token:
-        raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
-    username = parse_user(token)
-    if not username:
-        raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
-    return username
-
-
-def _settings_for_render(settings: ProxySettings, proxy_groups) -> dict:
-    return {
-        "listen_host": settings.listen_host,
-        "listen_port": settings.listen_port,
-        "web_host": settings.web_host,
-        "web_port": settings.web_port,
-        "allowed_client_ips": settings.allowed_client_ips,
-        "default_proxy_group_id": int(settings.default_proxy_group_id or 1),
-        "proxy_groups": proxy_groups,
-    }
-
-
-def _parse_optional_group_id(value: object, proxy_groups) -> int:
-    if value is None:
-        return 0
-    group_id = _parse_int(value, default=0, minimum=0)
-    if group_id <= 0:
-        return 0
-
-    for g in proxy_groups:
-        if int(g["id"]) == group_id:
-            return group_id
-    return 0
-
-
-def _group_rule_counts(rules) -> dict[int, int]:
-    counts: dict[int, int] = {}
-    for rule in rules:
-        raw_gid = rule["group_id"] or 1
-        gid = int(raw_gid)
-        counts[gid] = counts.get(gid, 0) + 1
-    return counts
-
-
-def _normalize_rule_ids(values: list[str] | None) -> list[int]:
-    if not values:
-        return []
-
-    ids = []
-    seen: set[int] = set()
-    for value in values:
-        rid = _parse_int(value, default=0, minimum=1)
-        if rid <= 0 or rid in seen:
-            continue
-        seen.add(rid)
-        ids.append(rid)
-    return ids
-
-
-def _domains_query_url(active_rule_group: int) -> str:
-    if active_rule_group > 0:
-        return f"/?tab=domains&rule_group={active_rule_group}"
-    return "/?tab=domains"
 
 
 def _allowed_networks() -> list[ipaddress._BaseNetwork]:
@@ -228,127 +124,9 @@ def _allowed_networks() -> list[ipaddress._BaseNetwork]:
     return entries
 
 
-def _parse_int(
-    value: object,
-    default: int,
-    minimum: int = 0,
-    maximum: int | None = None,
-) -> int:
-    try:
-        num = int(value)
-    except (TypeError, ValueError):
-        return default
-    if num < minimum:
-        num = minimum
-    if maximum is not None and num > maximum:
-        num = maximum
-    return num
-
-
-def _parse_proxy_pool(raw: str) -> list[dict[str, str | int]]:
-    entries: list[dict[str, str | int]] = []
-    raw = (raw or "").strip()
-    if not raw:
-        return entries
-
-    for line in raw.replace(";", "\n").split("\n"):
-        item = line.strip()
-        if not item:
-            continue
-
-        if "://" in item:
-            parsed = _extract_proxy_url(item)
-            if parsed is None:
-                raise ValueError("single_ip_invalid_pool")
-            entries.append(parsed)
-            continue
-
-        if ":" not in item:
-            raise ValueError("single_ip_invalid_pool")
-
-        host = ""
-        port = 0
-        username = ""
-        password = ""
-        parts = item.split(":")
-        if item.startswith("["):
-            end = item.find("]")
-            if end <= 0:
-                raise ValueError("single_ip_invalid_pool")
-            host = item[1:end].strip()
-            tail = item[end + 1 :].strip()
-            if not tail.startswith(":"):
-                raise ValueError("single_ip_invalid_pool")
-            tail = tail[1:]
-            main, _, _rest = tail.partition(":")
-            port_part = main.strip()
-            if port_part:
-                port = _parse_int(port_part, default=0, minimum=1, maximum=65535)
-                if port == 0:
-                    raise ValueError("single_ip_invalid_pool")
-            else:
-                raise ValueError("single_ip_invalid_pool")
-            if _rest:
-                auth = _rest.split(":", 2)
-                username = auth[0].strip()
-                password = (auth[1].strip() if len(auth) > 1 else "").strip()
-        else:
-            tokens = item.split(":")
-            if len(tokens) < 2:
-                raise ValueError("single_ip_invalid_pool")
-            host = tokens[0].strip()
-            port = _parse_int(tokens[1].strip(), default=0, minimum=1, maximum=65535)
-            if not host or port == 0:
-                raise ValueError("single_ip_invalid_pool")
-            if len(tokens) > 2:
-                username = tokens[2].strip()
-            if len(tokens) > 3:
-                password = ":".join(tokens[3:]).strip()
-
-        if not host or not port:
-            raise ValueError("single_ip_invalid_pool")
-        entries.append(
-            {
-                "host": host,
-                "port": port,
-                "username": username,
-                "password": password,
-            }
-        )
-
-    return entries
-
-
-def _extract_proxy_url(raw: str) -> dict[str, str | int] | None:
-    text = raw.strip()
-    if not text:
-        return None
-
-    from urllib.parse import urlsplit
-
-    target = text if "://" in text else f"http://{text}"
-    parsed = urlsplit(target)
-    if not parsed.hostname or not parsed.port:
-        return None
-    return {
-        "host": parsed.hostname,
-        "port": parsed.port,
-        "username": parsed.username or "",
-        "password": parsed.password or "",
-    }
-
-
-def _parse_bool(value: object) -> int:
-    if isinstance(value, bool):
-        return 1 if value else 0
-    text = str(value).strip().lower()
-    return 1 if text in {"1", "true", "on", "yes", "y"} else 0
-
-
 def _ip_allowed(request: Request) -> bool:
     settings = load_settings(SETTINGS_PATH)
-    raw = (settings.allowed_client_ips or "").strip()
-    if not raw:
+    if not (settings.allowed_client_ips or "").strip():
         return True
 
     if request.client is None or not request.client.host:
@@ -370,464 +148,170 @@ def _require_web_access(request: Request):
         raise HTTPException(status_code=403, detail="Forbidden: IP not in allowlist")
 
 
-def _normalize_group_fields(
-    *,
-    proxy_mode: str,
-    proxy_protocol: str = "http",
-    proxy_host: str = "",
-    proxy_port: int | str = 0,
-    proxy_username: str = "",
-    proxy_password: str = "",
-    api_url: str = "",
-    api_method: str = "GET",
-    api_timeout: int | str = 8,
-    api_cache_ttl: int | str = 20,
-    api_headers: str = "",
-    api_body: str = "",
-    api_host_key: str = "host",
-    api_port_key: str = "port",
-    api_username_key: str = "username",
-    api_password_key: str = "password",
-    api_proxy_field: str = "proxy",
-    proxy_pool: str = "",
-    proxy_round_robin: int | str = 0,
-    bigdata_api_url: str = "",
-    bigdata_api_token: str = "",
-) -> dict:
-    mode = _normalize_proxy_mode(proxy_mode)
-    protocol = (proxy_protocol or "http").strip() or "http"
-    timeout = _parse_int(api_timeout, default=8, minimum=1, maximum=120)
-    ttl = _parse_int(api_cache_ttl, default=20, minimum=0, maximum=86400)
-    port = _parse_int(proxy_port, default=0, minimum=0, maximum=65535)
-    method = (api_method or "GET").strip().upper()
-    if method not in {"GET", "POST", "PUT", "PATCH"}:
-        method = "GET"
+@app.middleware("http")
+async def _web_access_middleware(request: Request, call_next):
+    if request.url.path.startswith("/ui"):
+        if not _ip_allowed(request):
+            return JSONResponse(status_code=403, content={"detail": "Forbidden: IP not in allowlist"})
+        if not request.cookies.get(COOKIE_NAME):
+            return RedirectResponse(url="/login", status_code=303)
 
-    if mode == "direct":
-        protocol = "http"
-    if mode == "single_ip":
-        pool = (proxy_pool or "").strip()
-        if not proxy_host.strip() and not pool:
-            raise ValueError("single_ip_missing_host")
-        if pool:
-            for item in _parse_proxy_pool(pool):
-                if not item["host"] or item["port"] <= 0:
-                    raise ValueError("single_ip_invalid_pool")
-    if mode == "api" and not api_url.strip():
-        raise ValueError("api_missing_url")
-    if mode == "bigdata_api" and not ((bigdata_api_url or "").strip() or (api_url or "").strip()):
-        raise ValueError("bigdata_missing_url")
-
-    return {
-        "mode": mode,
-        "protocol": protocol,
-        "proxy_host": (proxy_host or "").strip(),
-        "proxy_port": port,
-        "proxy_username": (proxy_username or "").strip(),
-        "proxy_password": proxy_password or "",
-        "proxy_pool": (proxy_pool or "").strip(),
-        "proxy_round_robin": 1 if _parse_bool(proxy_round_robin) else 0,
-        "api_url": (api_url or "").strip(),
-        "api_method": method,
-        "api_timeout": timeout,
-        "api_cache_ttl": ttl,
-        "api_headers": (api_headers or "").strip(),
-        "api_body": api_body or "",
-        "api_host_key": (api_host_key or "host").strip(),
-        "api_port_key": (api_port_key or "port").strip(),
-        "api_username_key": (api_username_key or "username").strip(),
-        "api_password_key": (api_password_key or "password").strip(),
-        "api_proxy_field": (api_proxy_field or "proxy").strip(),
-        "bigdata_api_url": (bigdata_api_url or "").strip(),
-        "bigdata_api_token": (bigdata_api_token or "").strip(),
-    }
+        username = parse_user(request.cookies.get(COOKIE_NAME))
+        if not username:
+            response = RedirectResponse(url="/login", status_code=303)
+            response.delete_cookie(COOKIE_NAME)
+            return response
+    response = await call_next(request)
+    return response
 
 
-def _normalize_group_id(value: object, proxy_groups) -> int:
-    if value is None:
-        raise ValueError("group_required")
-    try:
-        group_id = int(value)
-    except (TypeError, ValueError):
-        raise ValueError("group_invalid")
-    for g in proxy_groups:
-        if int(g["id"]) == group_id:
-            return group_id
-    raise ValueError("group_not_exist")
+def _safe_error(error: str | None) -> str:
+    return html.escape((error or "").strip())
+
+
+def _render_login_page(next_url: str = "/ui/", error: str | None = None) -> str:
+    err_text = _safe_error(error)
+    err_html = f'<div class="error">{err_text}</div>' if err_text else ""
+    return f"""
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>代理管理登录</title>
+  <style>
+    :root {{
+      --bg: radial-gradient(120deg, #0e1f3a 0%, #0a1325 55%, #060d18 100%);
+      --card: #12213a;
+      --text: #e7f0ff;
+      --muted: #93a4bf;
+      --line: #284065;
+      --primary: #5c8cff;
+    }}
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    }}
+    .box {{
+      width: min(460px, 92vw);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+    }}
+    .title {{
+      margin: 0 0 12px;
+      letter-spacing: 0.5px;
+      font-size: 1.3rem;
+    }}
+    .hint {{ color: var(--muted); margin-bottom: 16px; }}
+    .field {{ margin-bottom: 14px; display: grid; gap: 8px; }}
+    label {{ font-size: 14px; }}
+    input {{
+      background: #0c1728;
+      border: 1px solid var(--line);
+      color: var(--text);
+      border-radius: 10px;
+      height: 38px;
+      padding: 0 12px;
+    }}
+    button {{
+      margin-top: 6px;
+      width: 100%;
+      border: 0;
+      height: 40px;
+      border-radius: 10px;
+      color: #fff;
+      background: linear-gradient(120deg, var(--primary), #7fd3ff);
+      cursor: pointer;
+      font-weight: 600;
+    }}
+    .error {{
+      color: #ffb4c0;
+      margin-bottom: 12px;
+      background: rgba(255, 76, 112, 0.12);
+      border-radius: 10px;
+      border: 1px solid rgba(255, 76, 112, 0.35);
+      padding: 8px 10px;
+      font-size: 0.95rem;
+    }}
+  </style>
+</head>
+<body>
+  <section class="box">
+    <h1 class="title">域名代理网关</h1>
+    <div class="hint">登录后即可管理域名代理与分组</div>
+    {err_html}
+    <form method="post" action="/login">
+      <input type="hidden" name="next" value="{next_url}" />
+      <div class="field">
+        <label for="username">用户名</label>
+        <input id="username" name="username" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label for="password">密码</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+      </div>
+      <button type="submit">进入控制台</button>
+    </form>
+  </section>
+</body>
+</html>
+"""
+
+
+def _normalize_next_url(path: str | None) -> str:
+    if not path or not str(path).startswith("/"):
+        return "/ui/"
+    return str(path)
 
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, _=Depends(_require_web_access)):
-    return templates.TemplateResponse(request, "login.html", {"error": None})
+async def login_page(
+    next: str = "/ui/",
+    error: str | None = None,
+    request: Request | None = None,
+    _=Depends(_require_web_access),
+):
+    if request is not None and request.cookies.get(COOKIE_NAME):
+        username = parse_user(request.cookies.get(COOKIE_NAME))
+        if username:
+            return RedirectResponse(url=_normalize_next_url(next), status_code=303)
+    return _render_login_page(_normalize_next_url(next), error)
 
 
 @app.post("/login")
 async def do_login(
-    request: Request,
     username: Annotated[str, Form()],
     password: Annotated[str, Form()],
+    next: str = Form("/ui/"),
     _: None = Depends(_require_web_access),
 ):
-    if not verify_user(DB_PATH, username, password):
-        return templates.TemplateResponse(
-            request,
-            "login.html",
-            {"error": "用户名或密码错误"},
-            status_code=401,
-        )
-    response = RedirectResponse(url="/ui/", status_code=303)
-    response.set_cookie(COOKIE_NAME, sign_user(username), httponly=True)
+    name = (username or "").strip()
+    pwd = password or ""
+    if not name or not pwd or not verify_user(DB_PATH, name, pwd):
+        return HTMLResponse(_render_login_page(_normalize_next_url(next), "用户名或密码错误"), status_code=401)
+    response = RedirectResponse(url=_normalize_next_url(next), status_code=303)
+    response.set_cookie(COOKIE_NAME, sign_user(name), httponly=True)
     return response
 
 
 @app.get("/logout")
 async def logout(_: None = Depends(_require_web_access)):
     response = RedirectResponse(url="/login", status_code=303)
-    response.delete_cookie("auth")
+    response.delete_cookie(COOKIE_NAME)
     return response
 
 
-@app.get("/", response_class=HTMLResponse)
-async def index(
-    request: Request,
-):
+@app.get("/")
+async def index():
     return RedirectResponse(url="/ui/", status_code=303)
-
-
-@app.post("/rules", status_code=303)
-async def add_rule_view(
-    pattern: Annotated[str, Form()],
-    kind: Annotated[str, Form()],
-    group_id: Annotated[int, Form()],
-    _: None = Depends(_require_web_access),
-    username: str = Depends(current_user),
-):
-    del username
-    proxy_groups = list_proxy_groups(DB_PATH)
-    pattern = pattern.strip()
-    if not pattern:
-        return RedirectResponse(url="/?tab=domains&error=pattern", status_code=303)
-    if kind not in {"exact", "suffix", "keyword"}:
-        return RedirectResponse(url="/?tab=domains&error=kind", status_code=303)
-    try:
-        gid = _normalize_group_id(group_id, proxy_groups)
-    except ValueError:
-        return RedirectResponse(url="/?tab=domains&error=group", status_code=303)
-    add_rule(DB_PATH, pattern, kind, gid)
-    return RedirectResponse(url=f"/?tab=domains&rule_group={gid}", status_code=303)
-
-
-@app.post("/rules/{rid}/delete", status_code=303)
-async def delete_rule(
-    rid: int,
-    current_group: int = 0,
-    _: None = Depends(_require_web_access),
-    username: str = Depends(current_user),
-):
-    del username
-    remove_rule(DB_PATH, rid)
-    return RedirectResponse(url=_domains_query_url(_parse_optional_group_id(current_group, list_proxy_groups(DB_PATH))), status_code=303)
-
-
-@app.post("/rules/bulk/delete", status_code=303)
-async def bulk_delete_rules(
-    rule_ids: list[str] = Form(default=[]),
-    current_group: int = Form(default=0),
-    _: None = Depends(_require_web_access),
-    username: str = Depends(current_user),
-):
-    del username
-    ids = _normalize_rule_ids(rule_ids)
-    if not ids:
-        return RedirectResponse(
-            url=f"{_domains_query_url(_parse_optional_group_id(current_group, list_proxy_groups(DB_PATH)))}&error=batch_no_selection",
-            status_code=303,
-        )
-    batch_delete_rules(DB_PATH, ids)
-    return RedirectResponse(url=_domains_query_url(_parse_optional_group_id(current_group, list_proxy_groups(DB_PATH))), status_code=303)
-
-
-@app.post("/rules/bulk/move", status_code=303)
-async def bulk_move_rules(
-    rule_ids: list[str] = Form(default=[]),
-    target_group: int = Form(default=0),
-    current_group: int = Form(default=0),
-    _: None = Depends(_require_web_access),
-    username: str = Depends(current_user),
-):
-    del username
-    proxy_groups = list_proxy_groups(DB_PATH)
-    try:
-        target = _normalize_group_id(target_group, proxy_groups)
-    except ValueError:
-        return RedirectResponse(
-            url=f"{_domains_query_url(_parse_optional_group_id(current_group, proxy_groups))}&error=batch_target_invalid",
-            status_code=303,
-        )
-
-    ids = _normalize_rule_ids(rule_ids)
-    if not ids:
-        return RedirectResponse(
-            url=f"{_domains_query_url(_parse_optional_group_id(current_group, proxy_groups))}&error=batch_no_selection",
-            status_code=303,
-        )
-    batch_move_rules(DB_PATH, ids, target)
-    return RedirectResponse(url=_domains_query_url(_parse_optional_group_id(current_group, proxy_groups)), status_code=303)
-
-
-@app.post("/proxy-groups", status_code=303)
-async def create_proxy_group(
-    name: Annotated[str, Form()],
-    proxy_mode: Annotated[str, Form()],
-    proxy_protocol: Annotated[str, Form()] = "http",
-    proxy_host: Annotated[str, Form()] = "",
-    proxy_port: Annotated[int, Form()] = 0,
-    proxy_username: Annotated[str, Form()] = "",
-    proxy_password: Annotated[str, Form()] = "",
-    proxy_pool: Annotated[str, Form()] = "",
-    proxy_round_robin: Annotated[str, Form()] = "",
-    api_url: Annotated[str, Form()] = "",
-    api_method: Annotated[str, Form()] = "GET",
-    api_timeout: Annotated[int, Form()] = 8,
-    api_cache_ttl: Annotated[int, Form()] = 20,
-    api_headers: Annotated[str, Form()] = "",
-    api_body: Annotated[str, Form()] = "",
-    api_host_key: Annotated[str, Form()] = "host",
-    api_port_key: Annotated[str, Form()] = "port",
-    api_username_key: Annotated[str, Form()] = "username",
-    api_password_key: Annotated[str, Form()] = "password",
-    api_proxy_field: Annotated[str, Form()] = "proxy",
-    bigdata_api_url: Annotated[str, Form()] = "",
-    bigdata_api_token: Annotated[str, Form()] = "",
-    _: None = Depends(_require_web_access),
-    username: str = Depends(current_user),
-):
-    del username
-    try:
-        payload = _normalize_group_fields(
-            proxy_mode=proxy_mode,
-            proxy_protocol=proxy_protocol,
-            proxy_host=proxy_host,
-            proxy_port=proxy_port,
-            proxy_username=proxy_username,
-            proxy_password=proxy_password,
-            proxy_pool=proxy_pool,
-            proxy_round_robin=proxy_round_robin,
-            api_url=api_url,
-            api_method=api_method,
-            api_timeout=api_timeout,
-            api_cache_ttl=api_cache_ttl,
-            api_headers=api_headers,
-            api_body=api_body,
-            api_host_key=api_host_key,
-            api_port_key=api_port_key,
-            api_username_key=api_username_key,
-            api_password_key=api_password_key,
-            api_proxy_field=api_proxy_field,
-            bigdata_api_url=bigdata_api_url,
-            bigdata_api_token=bigdata_api_token,
-        )
-    except ValueError as exc:
-        return RedirectResponse(url=f"/?tab=proxies&error={exc}", status_code=303)
-
-    if not name.strip():
-        return RedirectResponse(url="/?tab=proxies&error=group_name", status_code=303)
-    try:
-        add_proxy_group(
-            DB_PATH,
-            name=name.strip(),
-            proxy_mode=payload["mode"],
-            proxy_protocol=payload["protocol"],
-            proxy_host=payload["proxy_host"],
-            proxy_port=payload["proxy_port"],
-            proxy_username=payload["proxy_username"],
-            proxy_password=payload["proxy_password"],
-            proxy_pool=payload["proxy_pool"],
-            proxy_round_robin=payload["proxy_round_robin"],
-            api_url=payload["api_url"],
-            api_method=payload["api_method"],
-            api_timeout=payload["api_timeout"],
-            api_cache_ttl=payload["api_cache_ttl"],
-            api_headers=payload["api_headers"],
-            api_body=payload["api_body"],
-            api_host_key=payload["api_host_key"],
-            api_port_key=payload["api_port_key"],
-            api_username_key=payload["api_username_key"],
-            api_password_key=payload["api_password_key"],
-            api_proxy_field=payload["api_proxy_field"],
-            bigdata_api_url=payload["bigdata_api_url"],
-            bigdata_api_token=payload["bigdata_api_token"],
-        )
-    except sqlite3.IntegrityError:
-        return RedirectResponse(url="/?tab=proxies&error=group_exists", status_code=303)
-    return RedirectResponse(url="/?tab=proxies", status_code=303)
-
-
-@app.post("/proxy-groups/{group_id}/update", status_code=303)
-async def update_proxy_group_view(
-    group_id: int,
-    name: Annotated[str, Form()],
-    proxy_mode: Annotated[str, Form()],
-    proxy_protocol: Annotated[str, Form()] = "http",
-    proxy_host: Annotated[str, Form()] = "",
-    proxy_port: Annotated[int, Form()] = 0,
-    proxy_username: Annotated[str, Form()] = "",
-    proxy_password: Annotated[str, Form()] = "",
-    proxy_pool: Annotated[str, Form()] = "",
-    proxy_round_robin: Annotated[str, Form()] = "",
-    api_url: Annotated[str, Form()] = "",
-    api_method: Annotated[str, Form()] = "GET",
-    api_timeout: Annotated[int, Form()] = 8,
-    api_cache_ttl: Annotated[int, Form()] = 20,
-    api_headers: Annotated[str, Form()] = "",
-    api_body: Annotated[str, Form()] = "",
-    api_host_key: Annotated[str, Form()] = "host",
-    api_port_key: Annotated[str, Form()] = "port",
-    api_username_key: Annotated[str, Form()] = "username",
-    api_password_key: Annotated[str, Form()] = "password",
-    api_proxy_field: Annotated[str, Form()] = "proxy",
-    bigdata_api_url: Annotated[str, Form()] = "",
-    bigdata_api_token: Annotated[str, Form()] = "",
-    _: None = Depends(_require_web_access),
-    username: str = Depends(current_user),
-):
-    del username
-    existing = get_proxy_group(DB_PATH, group_id)
-    if existing is None:
-        return RedirectResponse(url="/?tab=proxies&error=group_not_found", status_code=303)
-
-    try:
-        payload = _normalize_group_fields(
-            proxy_mode=proxy_mode,
-            proxy_protocol=proxy_protocol,
-            proxy_host=proxy_host,
-            proxy_port=proxy_port,
-            proxy_username=proxy_username,
-            proxy_password=proxy_password,
-            proxy_pool=proxy_pool,
-            proxy_round_robin=proxy_round_robin,
-            api_url=api_url,
-            api_method=api_method,
-            api_timeout=api_timeout,
-            api_cache_ttl=api_cache_ttl,
-            api_headers=api_headers,
-            api_body=api_body,
-            api_host_key=api_host_key,
-            api_port_key=api_port_key,
-            api_username_key=api_username_key,
-            api_password_key=api_password_key,
-            api_proxy_field=api_proxy_field,
-            bigdata_api_url=bigdata_api_url,
-            bigdata_api_token=bigdata_api_token,
-        )
-    except ValueError as exc:
-        return RedirectResponse(url=f"/?tab=proxies&error={exc}", status_code=303)
-
-    if not name.strip():
-        return RedirectResponse(url="/?tab=proxies&error=group_name", status_code=303)
-
-    try:
-        updated = update_proxy_group(
-            DB_PATH,
-            group_id=group_id,
-            name=name.strip(),
-            proxy_mode=payload["mode"],
-            proxy_protocol=payload["protocol"],
-            proxy_host=payload["proxy_host"],
-            proxy_port=payload["proxy_port"],
-            proxy_username=payload["proxy_username"],
-            proxy_password=payload["proxy_password"],
-            proxy_pool=payload["proxy_pool"],
-            proxy_round_robin=payload["proxy_round_robin"],
-            api_url=payload["api_url"],
-            api_method=payload["api_method"],
-            api_timeout=payload["api_timeout"],
-            api_cache_ttl=payload["api_cache_ttl"],
-            api_headers=payload["api_headers"],
-            api_body=payload["api_body"],
-            api_host_key=payload["api_host_key"],
-            api_port_key=payload["api_port_key"],
-            api_username_key=payload["api_username_key"],
-            api_password_key=payload["api_password_key"],
-            api_proxy_field=payload["api_proxy_field"],
-            bigdata_api_url=payload["bigdata_api_url"],
-            bigdata_api_token=payload["bigdata_api_token"],
-        )
-    except sqlite3.IntegrityError:
-        return RedirectResponse(url="/?tab=proxies&error=group_exists", status_code=303)
-    if not updated:
-        return RedirectResponse(url="/?tab=proxies&error=update_failed", status_code=303)
-    return RedirectResponse(url="/?tab=proxies", status_code=303)
-
-
-@app.post("/proxy-groups/{group_id}/delete", status_code=303)
-async def delete_proxy_group(
-    group_id: int,
-    _: None = Depends(_require_web_access),
-    username: str = Depends(current_user),
-):
-    del username
-    if not remove_proxy_group(DB_PATH, group_id):
-        return RedirectResponse(url="/?tab=proxies&error=group_in_use", status_code=303)
-    return RedirectResponse(url="/?tab=proxies", status_code=303)
-
-
-@app.post("/system", status_code=303)
-async def update_system_settings(
-    listen_host: Annotated[str, Form()],
-    listen_port: Annotated[int, Form()],
-    web_host: Annotated[str, Form()],
-    web_port: Annotated[int, Form()],
-    default_proxy_group_id: Annotated[int, Form()],
-    allowed_client_ips: Annotated[str, Form()] = "",
-    _: None = Depends(_require_web_access),
-    username: str = Depends(current_user),
-):
-    del username
-    settings = load_settings(SETTINGS_PATH)
-    proxy_groups = list_proxy_groups(DB_PATH)
-
-    default_group = _normalize_group_id(default_proxy_group_id, proxy_groups)
-    settings.listen_host = listen_host.strip() or "0.0.0.0"
-    settings.listen_port = _parse_int(listen_port, default=3128, minimum=1, maximum=65535)
-    settings.web_host = web_host.strip() or "0.0.0.0"
-    settings.web_port = _parse_int(web_port, default=8080, minimum=1, maximum=65535)
-    settings.default_proxy_group_id = default_group
-    settings.allowed_client_ips = allowed_client_ips.strip()
-    save_settings(SETTINGS_PATH, settings)
-    return RedirectResponse(url="/?tab=system", status_code=303)
-
-
-@app.post("/users", status_code=303)
-async def add_user(
-    username: Annotated[str, Form()],
-    password: Annotated[str, Form()],
-    _: None = Depends(_require_web_access),
-    operator: str = Depends(current_user),
-):
-    del operator
-    username = username.strip()
-    if not username or not password:
-        return RedirectResponse(url="/?tab=system&error=user_input", status_code=303)
-    if user_exists(DB_PATH, username):
-        return RedirectResponse(url="/?tab=system&error=user_exists", status_code=303)
-    create_user(DB_PATH, username, password)
-    return RedirectResponse(url="/?tab=system", status_code=303)
-
-
-@app.post("/users/{user_id}/password", status_code=303)
-async def change_password(
-    user_id: int,
-    new_password: Annotated[str, Form()],
-    _: None = Depends(_require_web_access),
-    operator: str = Depends(current_user),
-):
-    del operator
-    if not new_password:
-        return RedirectResponse(url="/?tab=system&error=pwd_empty", status_code=303)
-    if not update_user_password(DB_PATH, user_id, new_password):
-        return RedirectResponse(url="/?tab=system&error=user_not_found", status_code=303)
-    return RedirectResponse(url="/?tab=system", status_code=303)
 
 
 @app.get("/health")
