@@ -193,9 +193,10 @@ function Ensure-Admin {
   $adminBootstrapPath = Join-Path ([System.IO.Path]::GetTempPath()) "proxy_auto_ensure_admin.py"
   $adminBootstrap = @'
 import os
+from pathlib import Path
 from app.db import init_db, get_user, create_user
 
-db_path = os.environ["DB_PATH"]
+db_path = Path(os.environ["DB_PATH"])
 admin_user = os.environ["PROXY_ADMIN_USER"]
 admin_password = os.environ["PROXY_ADMIN_PASSWORD"]
 

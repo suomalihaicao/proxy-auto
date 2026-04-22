@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-04-22
+
+### Added
+- 增加数据库初始化 schema：`app/schema.sql`。
+- 修复并说明数据库在异常状态下的恢复行为，避免服务因损坏数据库文件直接退出。
+
+### Changed
+- `app/db.py` 启动时优先按 schema 文件初始化缺失结构，遇到损坏数据库自动迁移重建并备份为 `.invalid`。
+- 统一补齐数据库路径类型兼容性：`init_db` 内部始终将路径归一化为 `Path`。
+
+### Fixed
+- 部署脚本调用 `init_db` 时传入字符串导致的启动阶段 `AttributeError`（`str` 没有 `.parent`）。
+
 ### Added
 - Windows 一键部署脚本支持 `--start-only` 与 `--interactive` 参数，默认行为调整为非交互启动，配置由 Web 面板完成。
 - `setup.sh` 文档与参数透传补齐，默认启动不再阻塞在交互式代理配置。

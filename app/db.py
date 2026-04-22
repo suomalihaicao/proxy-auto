@@ -40,6 +40,26 @@ def get_conn(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _schema_sql_path() -> Path:
+    return Path(__file__).resolve().parent / "schema.sql"
+
+
+def _read_schema_sql() -> str:
+    return _schema_sql_path().read_text(encoding="utf-8")
+
+
+def _has_table(conn: sqlite3.Connection, table: str) -> bool:
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
+def _ensure_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(_read_schema_sql())
+
+
 def _utc_now() -> str:
     return datetime.utcnow().isoformat()
 
@@ -152,59 +172,13 @@ def ensure_default_proxy_group(
 
 
 def init_db(db_path: Path) -> None:
+    db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with get_conn(db_path) as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
 
-            CREATE TABLE IF NOT EXISTS rules (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pattern TEXT NOT NULL,
-                kind TEXT NOT NULL CHECK (kind IN ('exact','suffix','keyword')),
-                enabled INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL
-            );
+    def _migrate(conn: sqlite3.Connection) -> None:
+        if not all(_has_table(conn, table) for table in ("users", "rules", "settings", "proxy_groups")):
+            _ensure_schema(conn)
 
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS proxy_groups (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                proxy_mode TEXT NOT NULL CHECK (proxy_mode IN ('direct', 'single_ip', 'api', 'bigdata_api', 'http', 'socks5')),
-                proxy_protocol TEXT NOT NULL DEFAULT 'http',
-                proxy_host TEXT NOT NULL DEFAULT '',
-                proxy_port INTEGER NOT NULL DEFAULT 0,
-                proxy_username TEXT NOT NULL DEFAULT '',
-                proxy_password TEXT NOT NULL DEFAULT '',
-                api_url TEXT NOT NULL DEFAULT '',
-                api_method TEXT NOT NULL DEFAULT 'GET',
-                api_timeout INTEGER NOT NULL DEFAULT 8,
-                api_cache_ttl INTEGER NOT NULL DEFAULT 20,
-                api_headers TEXT NOT NULL DEFAULT '',
-                api_body TEXT NOT NULL DEFAULT '',
-                api_host_key TEXT NOT NULL DEFAULT 'host',
-                api_port_key TEXT NOT NULL DEFAULT 'port',
-                api_username_key TEXT NOT NULL DEFAULT 'username',
-                api_password_key TEXT NOT NULL DEFAULT 'password',
-                api_proxy_field TEXT NOT NULL DEFAULT 'proxy',
-                proxy_pool TEXT NOT NULL DEFAULT '',
-                proxy_round_robin INTEGER NOT NULL DEFAULT 0,
-                bigdata_api_url TEXT NOT NULL DEFAULT '',
-                bigdata_api_token TEXT NOT NULL DEFAULT '',
-                enabled INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL
-            );
-            """
-        )
         if not _has_column(conn, "proxy_groups", "proxy_pool"):
             conn.execute(
                 "ALTER TABLE proxy_groups ADD COLUMN proxy_pool TEXT NOT NULL DEFAULT ''"
@@ -213,7 +187,10 @@ def init_db(db_path: Path) -> None:
             conn.execute(
                 "ALTER TABLE proxy_groups ADD COLUMN proxy_round_robin INTEGER NOT NULL DEFAULT 0"
             )
-
+        if not _has_column(conn, "rules", "group_id"):
+            conn.execute(
+                "ALTER TABLE rules ADD COLUMN group_id INTEGER NOT NULL DEFAULT 1"
+            )
         if _has_column(conn, "proxy_groups", "proxy_pool"):
             conn.execute(
                 "UPDATE proxy_groups SET proxy_pool = '' WHERE proxy_pool IS NULL"
@@ -222,12 +199,24 @@ def init_db(db_path: Path) -> None:
             conn.execute(
                 "UPDATE proxy_groups SET proxy_round_robin = 0 WHERE proxy_round_robin IS NULL"
             )
-        if not _has_column(conn, "rules", "group_id"):
-            conn.execute("ALTER TABLE rules ADD COLUMN group_id INTEGER NOT NULL DEFAULT 1")
-
         if _has_column(conn, "rules", "group_id"):
-            conn.execute("UPDATE rules SET group_id = 1 WHERE group_id IS NULL OR group_id <= 0")
+            conn.execute(
+                "UPDATE rules SET group_id = 1 WHERE group_id IS NULL OR group_id <= 0"
+            )
         conn.commit()
+
+    try:
+        with get_conn(db_path) as conn:
+            _migrate(conn)
+    except sqlite3.DatabaseError:
+        backup_path = db_path.with_name(f"{db_path.name}.invalid")
+        if db_path.exists():
+            try:
+                db_path.replace(backup_path)
+            except OSError:
+                db_path.unlink()
+        with get_conn(db_path) as conn:
+            _migrate(conn)
 
 
 def create_user(db_path: Path, username: str, password: str) -> None:

@@ -672,9 +672,11 @@ PY
 DB_PATH="$DB_PATH" \
 "$VENV_PYTHON" - <<'PY'
 import os
+from pathlib import Path
 from app.db import init_db, get_user, create_user
 
 db_path = os.environ["DB_PATH"] if "DB_PATH" in os.environ else os.path.join("data", "app.db")
+db_path = Path(db_path)
 admin_user = os.environ["PROXY_ADMIN_USER"]
 admin_password = os.environ["PROXY_ADMIN_PASSWORD"]
 

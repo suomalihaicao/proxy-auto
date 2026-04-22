@@ -276,10 +276,10 @@ def _normalize_next_url(path: str | None) -> str:
 async def login_page(
     next: str = "/ui/",
     error: str | None = None,
-    request: Request | None = None,
+    request: Request,
     _=Depends(_require_web_access),
 ):
-    if request is not None and request.cookies.get(COOKIE_NAME):
+    if request.cookies.get(COOKIE_NAME):
         username = parse_user(request.cookies.get(COOKIE_NAME))
         if username:
             return RedirectResponse(url=_normalize_next_url(next), status_code=303)

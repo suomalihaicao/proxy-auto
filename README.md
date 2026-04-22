@@ -1,6 +1,6 @@
 # Domain Proxy Manager
 
-版本：v1.1.0
+版本：v1.1.1
 
 一个带登录的轻量代理网关管理器，用于在 Linux/Windows 上统一处理“部分域名走上游代理、其他域名直连”的场景。  
 前端管理页面已重构为 Dash，统一入口为 `/ui`，不再渲染旧的模板管理页。
@@ -151,6 +151,7 @@ Windows 安装脚本会自动：
 - `app/db.py`：规则和用户数据库
 - `app/config.py`：监听、端口、上游代理配置
 - `data/app.db`：规则与管理员数据（运行后自动创建）
+- `app/schema.sql`：数据库初始化 schema（首次部署与坏库重建时使用）
 - `data/settings.json`：运行时配置（安装生成）
 - `scripts/install.sh`：一键安装脚本
 - `scripts/fix-access.sh`：外网访问排查脚本（若创建）

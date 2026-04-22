@@ -180,11 +180,13 @@ pip install -r "$BASE_DIR/requirements.txt"
 echo "初始化数据库并写入管理员..."
 DB_PATH="$DATA_DIR/app.db"
 PYTHONPATH="$BASE_DIR" python3 - <<PY
+from pathlib import Path
 from app.db import init_db, get_user, create_user
 
 db_path = "$DB_PATH"
 admin_user = "$admin_user"
 admin_password = "$admin_password"
+db_path = Path(db_path)
 
 init_db(db_path)
 if get_user(db_path, admin_user) is None:
