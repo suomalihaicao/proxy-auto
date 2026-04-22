@@ -298,70 +298,78 @@ function Start-ServiceInTerminal {
 function Get-PidsByPort {
   param([int]$PortToCheck)
 
-  $pids = @()
+  $procIds = New-Object System.Collections.ArrayList
 
   try {
     $listeners = Get-NetTCPConnection -State Listen -LocalPort $PortToCheck -ErrorAction Stop
-    $pids = $listeners | ForEach-Object { $_.OwningProcess } | Where-Object { $_ -ne $null } | Sort-Object -Unique
+    foreach ($listener in $listeners) {
+      if ($null -ne $listener.OwningProcess) {
+        [void]$procIds.Add([int]$listener.OwningProcess)
+      }
+    }
   } catch {
-    $pattern = "TCP\s+\S+:$PortToCheck\s+\S+\s+LISTENING\s+(\d+)"
-    $netstat = netstat -ano -p tcp 2>$null | Select-String -Pattern $pattern
-    if ($netstat -and $netstat.Matches) {
-      foreach ($match in $netstat.Matches) {
-        if ($match.Groups.Count -gt 1) {
-          $candidate = $match.Groups[1].Value.Trim()
-          if (-not [string]::IsNullOrWhiteSpace($candidate)) {
-            $pids += [int]$candidate
+    $netstatLines = netstat -ano -p tcp 2>$null
+    foreach ($line in $netstatLines) {
+      if ($line -match "LISTENING") {
+        $parts = ($line -replace '^\s+', '') -split '\s+'
+        if ($parts.Count -ge 5) {
+          $localAddress = [string]$parts[1]
+          $state = [string]$parts[3]
+          $procIdText = [string]$parts[4]
+          if ($state -eq "LISTENING" -and $localAddress.EndsWith(":$PortToCheck")) {
+            if (-not [string]::IsNullOrWhiteSpace($procIdText)) {
+              [void]$procIds.Add([int]$procIdText)
+            }
           }
         }
       }
-      $pids = $pids | Sort-Object -Unique
     }
   }
 
-  return $pids
+  return $procIds | Sort-Object -Unique
 }
 
 function Ensure-WebPortFree {
   param([int]$Port)
+
   if ($Port -le 0 -or $Port -gt 65535) {
-    throw "无效端口: $Port"
+    throw "Invalid port: $Port"
   }
 
-  $pids = Get-PidsByPort -PortToCheck $Port
-  if (-not $pids -or $pids.Count -eq 0) {
-    Write-DeployLog "端口 ${Port} 当前空闲"
+  $procIds = @(Get-PidsByPort -PortToCheck $Port)
+  if (-not $procIds -or $procIds.Count -eq 0) {
+    Write-DeployLog "Port ${Port} is free"
     return
   }
 
-  Write-DeployLog "检测到端口 ${Port} 被占用，准备强制终止对应进程: $($pids -join ',')"
-  foreach ($pid in $pids) {
+  Write-DeployLog "Port ${Port} is occupied, stopping processes: $($procIds -join ',')"
+  foreach ($procId in $procIds) {
     try {
-      $proc = Get-Process -Id $pid -ErrorAction Stop
+      $proc = Get-Process -Id $procId -ErrorAction Stop
       if ($null -ne $proc) {
-        Write-DeployLog "强制停止: $($proc.ProcessName) (PID=$pid)"
+        Write-DeployLog "Stopping process: $($proc.ProcessName) (PID=$procId)"
         try {
-          Stop-Process -Id $pid -Force -ErrorAction Stop
+          Stop-Process -Id $procId -Force -ErrorAction Stop
         } catch {
-          & taskkill.exe /F /PID $pid 2>$null | Out-Null
+          & taskkill.exe /F /PID $procId 2>$null | Out-Null
         }
       }
     } catch {
-      # ignore if process already gone
+      # Process already exited.
     }
   }
 
   $retries = 6
   for ($i = 0; $i -lt $retries; $i++) {
     Start-Sleep -Seconds 1
-    $remaining = Get-PidsByPort -PortToCheck $Port
+    $remaining = @(Get-PidsByPort -PortToCheck $Port)
     if (-not $remaining -or $remaining.Count -eq 0) {
-      Write-DeployLog "端口 ${Port} 已释放"
+      Write-DeployLog "Port ${Port} released"
       return
     }
   }
 
-  throw "端口 ${Port} 仍被占用（Pids: $($pids -join ',')），请先释放端口后再启动。"
+  throw "Port ${Port} is still occupied: $($procIds -join ',')"
 }
 
 function Get-WebLoginUrl {
