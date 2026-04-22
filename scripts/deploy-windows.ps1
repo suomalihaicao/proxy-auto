@@ -189,7 +189,9 @@ function Ensure-Admin {
   $env:DB_PATH = $DbPath
   $env:PROXY_ADMIN_USER = $AdminUser
   $env:PROXY_ADMIN_PASSWORD = $AdminPassword
-  & $PythonBinary -c @'
+
+  $adminBootstrapPath = Join-Path ([System.IO.Path]::GetTempPath()) "proxy_auto_ensure_admin.py"
+  $adminBootstrap = @'
 import os
 from app.db import init_db, get_user, create_user
 
@@ -200,10 +202,17 @@ admin_password = os.environ["PROXY_ADMIN_PASSWORD"]
 init_db(db_path)
 if get_user(db_path, admin_user) is None:
     create_user(db_path, admin_user, admin_password)
-    print(f"Admin created: {admin_user}")
+    print("Admin created: {}".format(admin_user))
 else:
-    print(f"Admin exists: {admin_user}")
-'@
+    print("Admin exists: {}".format(admin_user))
+  '@
+
+  Set-Content -Path $adminBootstrapPath -Value $adminBootstrap -Encoding utf8
+  try {
+    & $PythonBinary $adminBootstrapPath
+  } finally {
+    Remove-Item -Path $adminBootstrapPath -ErrorAction SilentlyContinue
+  }
 }
 
 function Start-ServiceInTerminal {
@@ -238,13 +247,13 @@ function Start-ServiceInTerminal {
 
 function Wait-ForServiceReady {
   param(
-    [string]$Host,
+    [string]$HostHint,
     [string]$Port,
     [int]$Attempts = 20,
     [int]$DelaySeconds = 1
   )
 
-  $healthUrl = "http://{0}:{1}/health" -f $Host, $Port
+  $healthUrl = "http://{0}:{1}/health" -f $HostHint, $Port
   for ($i = 0; $i -lt $Attempts; $i++) {
     try {
       $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 2
@@ -260,13 +269,13 @@ function Wait-ForServiceReady {
 
 function Open-WebPanel {
   param(
-    [string]$Host,
+    [string]$HostHint,
     [string]$Port,
     [string]$AdminUser,
     [string]$AdminPassword
   )
 
-  $webUrl = "http://{0}:{1}/login" -f $Host, $Port
+  $webUrl = "http://{0}:{1}/login" -f $HostHint, $Port
   Write-DeployLog ("Web URL: {0}" -f $webUrl)
   Write-DeployLog ("Default login: {0} / {1}" -f $AdminUser, $AdminPassword)
 
@@ -783,8 +792,8 @@ if ($startNow -match '^[Nn]$') {
   $proc = Start-ServiceInTerminal -PythonBinary $VenvPython -WebPort $webPort
   Write-DeployLog "Service terminal started, PID=$($proc.Id)"
 
-  if (Wait-ForServiceReady -Host $webHostHint -Port $webPort -Attempts 20 -DelaySeconds 1) {
-    Open-WebPanel -Host $webHostHint -Port $webPort -AdminUser $adminUser -AdminPassword $adminPassword
+  if (Wait-ForServiceReady -HostHint $webHostHint -Port $webPort -Attempts 20 -DelaySeconds 1) {
+    Open-WebPanel -HostHint $webHostHint -Port $webPort -AdminUser $adminUser -AdminPassword $adminPassword
   } else {
     Write-DeployLog "Health check timeout (about 20s), please verify the service status manually."
     Write-DeployLog "Suggested URL: http://{0}:{1}/login" -f $webHostHint, $webPort
