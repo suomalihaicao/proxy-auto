@@ -12,7 +12,8 @@ while [[ $# -gt 0 ]]; do
   case "${1:-}" in
     -h|--help)
       echo "[setup] 用法: ./setup.sh [--windows|--linux|--start-only|--interactive]"
-      echo "  --start-only  非交互启动（默认），用于快速把服务拉起到 web 面板里配置"
+      echo "  --start-only  非交互启动（默认），用于快速把服务拉起到 web 面板里配置。"
+      echo "                这是首次部署主流程，包含部署初始化与启动。"
       echo "  --interactive 手工写入 settings 与管理员参数"
       echo "  --linux       强制使用 Linux 部署流程"
       echo "  --windows     强制使用 Windows 部署脚本"

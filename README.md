@@ -48,6 +48,9 @@ Set-Location C:\path\to\domain-proxy-manager
 
 在 Git Bash 下直接运行 `./setup.sh`，会自动识别到 Windows 环境并调用 PowerShell 部署脚本；如需强制 Linux 路径，可加 `--linux`。
 
+`setup.sh` 是**首次部署入口**，会完成初始化与默认配置兜底，并在结束时直接启动服务（启动口默认 6666）。  
+`run.sh` 负责启动服务，部署完成后可直接单独执行 `./run.sh` 复用启动逻辑。
+
 ## 一键部署
 
 Linux 下直接运行：
@@ -174,6 +177,14 @@ Windows 安装脚本会自动：
 ```
 
 ## 手动启动（未安装 systemd）
+
+部署完成后如果仅需启动服务，优先执行：
+
+```bash
+./run.sh
+```
+
+`run.sh` 会读取 `data/settings.json` 的 host/port（缺省为 `0.0.0.0:6666`），不改配置仅用于启动。
 
 ```bash
 python3 -m venv .venv
