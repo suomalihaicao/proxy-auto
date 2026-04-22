@@ -205,7 +205,7 @@ if get_user(db_path, admin_user) is None:
     print("Admin created: {}".format(admin_user))
 else:
     print("Admin exists: {}".format(admin_user))
-  '@
+'@
 
   Set-Content -Path $adminBootstrapPath -Value $adminBootstrap -Encoding utf8
   try {
