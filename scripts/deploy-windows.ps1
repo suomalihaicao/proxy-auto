@@ -30,7 +30,10 @@ Write-Host ("[deploy] Environment tools directory: {0} (dependency cache and ins
 
 function Write-DeployLog {
   param([string]$Message)
-  Write-Host "[deploy] $Message"
+  if ($null -eq $Message) {
+    $Message = ""
+  }
+  [Console]::WriteLine("[deploy] {0}", [string]$Message)
 }
 
 function Show-Usage {
@@ -709,14 +712,14 @@ function Select-FastestPipSource {
   foreach ($mirror in $mirrors) {
     $latency = Get-PipMirrorLatency -Url $mirror
     if ($null -ne $latency) {
-      Write-DeployLog "Mirror available: $mirror | latency=$([math]::Round($latency,3))s"
+      Write-DeployLog ("Mirror available: {0} | latency={1}s" -f $mirror, [math]::Round($latency, 3))
       if ($latency -lt $best) {
         $best = $latency
         $picked = $mirror
       }
       $hasAvailable = $true
     } else {
-      Write-DeployLog "Mirror unreachable: $mirror"
+      Write-DeployLog ("Mirror unreachable: {0}" -f $mirror)
     }
   }
 
@@ -725,7 +728,7 @@ function Select-FastestPipSource {
     return "https://pypi.org/simple"
   }
 
-  Write-DeployLog "Selected fastest pip source: $picked"
+  Write-DeployLog ("Selected fastest pip source: {0}" -f $picked)
   return $picked
 }
 
