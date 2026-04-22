@@ -141,7 +141,8 @@ function Write-DeploymentSettings {
   }
 
   $settingsJson = $settings | ConvertTo-Json -Depth 2
-  Set-Content -Path $SettingsPath -Value $settingsJson -Encoding UTF8
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($SettingsPath, $settingsJson, $utf8NoBom)
 }
 
 function Ensure-DefaultSettings {
@@ -217,7 +218,8 @@ else:
   }
 
   Set-Location $BaseDir
-  Set-Content -Path $adminBootstrapPath -Value $adminBootstrap -Encoding utf8
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($adminBootstrapPath, $adminBootstrap, $utf8NoBom)
   try {
     & $PythonBinary $adminBootstrapPath
   } finally {

@@ -41,7 +41,7 @@ class ProxySettings:
 def load_settings(path: Path) -> ProxySettings:
     if not path.exists():
         return ProxySettings()
-    with path.open("r", encoding="utf-8") as fp:
+    with path.open("r", encoding="utf-8-sig") as fp:
         raw = json.load(fp)
     return ProxySettings(**{**asdict(ProxySettings()), **raw})
 
